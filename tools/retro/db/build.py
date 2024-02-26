@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import threading
 import torch
+import mcr_dl
 from tqdm import tqdm
 import types
 
@@ -97,7 +98,7 @@ def build_partial_db(
 
     # Print progress.
     progress_proc_ids = set(range(n_procs)) \
-        if torch.distributed.get_rank() == 0 else set()
+        if mcr_dl.get_distributed_engine().get_rank() == 0 else set()
     if proc_id in progress_proc_ids:
         print(" > building partial chunk db, proc %d / %d, docs %d:%d / %d."%(
             proc_id,
@@ -192,8 +193,10 @@ def build_individual_db(dataset_idx, n_datasets, dataset_info, tokenizers):
         validate=lambda f : f["chunks_valid"].shape == (0,) \
             or f["chunks_valid"].shape[1] == 4)
 
+    dist = mcr_dl.get_distributed_engine()
+
     # Prevent missing-path-write race condition.
-    torch.distributed.barrier()
+    dist.barrier()
 
     if not missing_db_blocks:
         return
@@ -273,7 +276,7 @@ def build_individual_db(dataset_idx, n_datasets, dataset_info, tokenizers):
 
             # Wait for all ranks to finish block.
             print_rank_0(" > waiting for all ranks to finish block.")
-            torch.distributed.barrier()
+            dist.barrier()
 
     print_rank_0(" > finished saving individual db.")
 
@@ -310,7 +313,8 @@ def update_chunk_counts(indexed_dataset_infos):
 
     args = get_retro_args()
 
-    if torch.distributed.get_rank() != 0:
+    dist = mcr_dl.get_distributed_engine()
+    if dist.get_rank() != 0:
         return
 
     # Data ratio sum (for setting index training chunks).
@@ -357,7 +361,8 @@ def update_chunk_counts(indexed_dataset_infos):
 def merge_dbs(indexed_dataset_infos, db_type):
     '''Merge individual DBs into single DB.'''
 
-    if torch.distributed.get_rank() != 0:
+    dist = mcr_dl.get_distributed_engine()
+    if dist.get_rank() != 0:
         return
 
     print(" > build %s chunk db." % db_type)
@@ -481,8 +486,9 @@ def build_db():
     # Build dbs.
     build_individual_dbs(indexed_dataset_infos)
 
+    dist = mcr_dl.get_distributed_engine()
     # Single-process going forward.
-    if torch.distributed.get_rank() != 0:
+    if dist.get_rank() != 0:
         return
 
     # Update n_chunks & save indexed dataset infos.

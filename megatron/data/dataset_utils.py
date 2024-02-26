@@ -25,6 +25,7 @@ import collections
 
 import numpy as np
 import torch
+import mcr_dl
 
 from megatron import (
     get_args,
@@ -522,7 +523,7 @@ def _build_train_valid_test_datasets(data_prefix, splits_string,
             assert indexed_dataset.document_indices.shape[0] == \
                 (total_num_of_documents + 1)
         return dataset
-    
+
     train_dataset = build_split_dataset(0, 'train')
     valid_dataset = build_split_dataset(1, 'valid')
     test_dataset = build_split_dataset(2, 'test')
@@ -668,8 +669,10 @@ def get_samples_mapping(indexed_dataset,
     indexmap_filename += '_{}s'.format(seed)
     indexmap_filename += '.npy'
 
+    dist = mcr_dl.get_distributed_engine()
+
     # Build the indexed mapping if not exist.
-    if torch.distributed.get_rank() == 0 and \
+    if dist.get_rank() == 0 and \
        not os.path.isfile(indexmap_filename):
         print(' > WARNING: could not find index map file {}, building '
               'the indices on rank 0 ...'.format(indexmap_filename))
@@ -679,7 +682,7 @@ def get_samples_mapping(indexed_dataset,
         assert indexed_dataset.sequence_lengths.dtype == np.int32
 
         # Build samples mapping
-        verbose = torch.distributed.get_rank() == 0
+        verbose = dist.get_rank() == 0
         start_time = time.time()
         print_rank_0(' > building samples index mapping for {} ...'.format(
             name))
@@ -707,11 +710,11 @@ def get_samples_mapping(indexed_dataset,
     # device_index=rank which is not the case for model
     # parallel case
     counts = torch.tensor([1], dtype=torch.long, device='cuda')
-    torch.distributed.all_reduce(counts, group=mpu.get_data_parallel_group())
-    torch.distributed.all_reduce(counts, group=mpu.get_pipeline_model_parallel_group())
+    dist.all_reduce(counts, group=mpu.get_data_parallel_group())
+    dist.all_reduce(counts, group=mpu.get_pipeline_model_parallel_group())
     assert counts[0].item() == (
-        torch.distributed.get_world_size() //
-        torch.distributed.get_world_size(group=mpu.get_tensor_model_parallel_group()))
+        dist.get_world_size() //
+        dist.get_world_size(group=mpu.get_tensor_model_parallel_group()))
 
     # Load indexed dataset.
     print_rank_0(' > loading indexed mapping from {}'.format(

@@ -1,6 +1,8 @@
 import os
-import torch
 import sys
+
+import torch
+import mcr_dl
 
 from megatron import get_args, print_rank_0, get_tokenizer
 from megatron.core import mpu
@@ -194,8 +196,9 @@ class BiEncoderModel(MegatronModule):
 
         checkpoint_name = get_checkpoint_name(args.bert_load, iteration, False)
         if mpu.get_data_parallel_rank() == 0:
+            dist = mcr_dl.get_distributed_engine()
             print('global rank {} is loading BERT checkpoint {}'.format(
-                torch.distributed.get_rank(), checkpoint_name))
+                dist.get_rank(), checkpoint_name))
 
         # Load the checkpoint.
         try:

@@ -9,6 +9,7 @@ from typing import Dict, Tuple
 
 import numpy
 import torch
+import mcr_dl
 
 from megatron.core.datasets.blended_megatron_dataset_config import BlendedMegatronDatasetConfig
 from megatron.core.datasets.indexed_dataset import MMapIndexedDataset
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 class GPTDatasetConfig(BlendedMegatronDatasetConfig):
     """Configuration object for Megatron Core GPT datasets
 
-    Attributes:          
+    Attributes:
         reset_position_ids (bool): Option to reset the position IDs in the dataset at an interval
 
         reset_attention_mask (bool): Option to reset the attention mask from the dataset
@@ -30,7 +31,7 @@ class GPTDatasetConfig(BlendedMegatronDatasetConfig):
         eod_mask_loss (bool): Option to enable the EOD mask loss
 
         vocab_size (int): Size of vocabulary
-      
+
     """
 
     reset_position_ids: bool = None
@@ -136,7 +137,7 @@ class GPTDataset(MegatronDataset):
 
     def _finalize(self) -> None:
         """Abstract method implementation
-        
+
         Load or build/cache the document, sample, and shuffle indices
         """
         (
@@ -274,7 +275,7 @@ class GPTDataset(MegatronDataset):
         self,
     ) -> Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
         """Build the document index, the sample index, and the shuffle index
-        
+
         The document index:
             -- 1-D
             -- An ordered array of document ids
@@ -321,7 +322,9 @@ class GPTDataset(MegatronDataset):
         num_tokens_per_epoch = self._get_num_tokens_per_epoch()
         num_epochs = self._get_num_epochs(num_tokens_per_epoch)
 
-        if not cache_hit and torch.distributed.get_rank() == 0:
+        dist = mcr_dl.get_distributed_engine()
+
+        if not cache_hit and dist.get_rank() == 0:
             log_single_rank(
                 logger,
                 logging.INFO,

@@ -1,7 +1,7 @@
 import sys
 import time
 import torch
-import torch.distributed as dist
+import mcr_dl
 
 from megatron import get_args, print_rank_0
 from megatron.core import mpu
@@ -114,7 +114,7 @@ class IndexBuilder(object):
         # This process signals to finalize its shard and then synchronize with
         # the other processes
         self.evidence_embedder_obj.save_shard()
-        torch.distributed.barrier()
+        mcr_dl.get_distributed_engine.barrier()
         del self.model
 
         # rank 0 process builds the final copy
@@ -126,4 +126,4 @@ class IndexBuilder(object):
         self.evidence_embedder_obj.clear()
 
         # complete building the final copy
-        torch.distributed.barrier()
+        mcr_dl.get_distributed_engine.barrier()

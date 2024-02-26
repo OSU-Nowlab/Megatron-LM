@@ -8,6 +8,8 @@ import time
 
 import numpy as np
 import torch
+import mcr_dl
+
 from datetime import timedelta
 
 from megatron import fused_kernels
@@ -53,7 +55,7 @@ def initialize_megatron(
     # tensorboard-writer, and timers.
     set_global_variables(args)
 
-    # torch.distributed initialization
+    # torch.distributed or mcr_dl.distributed initialization based
     def finish_mpu_init():
         args = get_args()
         # Pytorch distributed.
@@ -103,7 +105,7 @@ def _compile_dependencies():
     # Compile dataset C++ code.
     # =========================
     # TODO: move this to ninja
-    if torch.distributed.get_rank() == 0:
+    if mcr_dl.get_distributed_engine.get_rank() == 0:
         start_time = time.time()
         print("> compiling dataset index builder ...")
         from megatron.core.datasets.utils import compile_helpers
@@ -147,20 +149,20 @@ def _compile_dependencies():
             )
 
     # Always build on rank zero first.
-    if torch.distributed.get_rank() == 0:
+    if mcr_dl.get_distributed_engine.get_rank() == 0:
         start_time = time.time()
         print("> compiling and loading fused kernels ...", flush=True)
         fused_kernels.load(args)
-        torch.distributed.barrier()
+        mcr_dl.get_distributed_engine.barrier()
     else:
-        torch.distributed.barrier()
+        mcr_dl.get_distributed_engine.barrier()
         fused_kernels.load(args)
     # Simple barrier to make sure all ranks have passed the
     # compilation phase successfully before moving on to the
     # rest of the program. We think this might ensure that
     # the lock is released.
-    torch.distributed.barrier()
-    if torch.distributed.get_rank() == 0:
+    mcr_dl.get_distributed_engine.barrier()
+    if mcr_dl.get_distributed_engine.get_rank() == 0:
         print(
             ">>> done with compiling and loading fused kernels. "
             "Compilation time: {:.3f} seconds".format(time.time() - start_time),
@@ -168,7 +170,7 @@ def _compile_dependencies():
         )
 
 def _initialize_tp_communicators():
-    """ initializing the communicators with user buffers for high-performance tensor-model-parallel 
+    """ initializing the communicators with user buffers for high-performance tensor-model-parallel
         communication overlap """
 
     try:
@@ -179,31 +181,32 @@ def _initialize_tp_communicators():
 
     except ImportError:
        raise RuntimeError("Tensor Parallel Communication/GEMM Overlap optimization needs 'yaml' and "
-             "'transformer_engine' packages") 
+             "'transformer_engine' packages")
 
     args = get_args()
 
     if args.tp_comm_overlap_cfg is not None:
-       with open(args.tp_comm_overlap_cfg,"r") as stream:    
+       with open(args.tp_comm_overlap_cfg,"r") as stream:
           ub_cfgs = yaml.safe_load(stream)
     else:
        ub_cfgs = {}
 
     input_shape = [args.seq_length * args.micro_batch_size , args.hidden_size]
 
-    #We create a MPI process group, which is needed to bootstrap the pipelined 
+    #We create a MPI process group, which is needed to bootstrap the pipelined
     #tensor-model-parallel communication overlap
-    torch.distributed.new_group(backend='mpi')
+    mcr_dl.get_distributed_engine.new_group(backend='mpi')
 
-    te_module.base.initialize_ub(shape = input_shape, tp_size = args.tensor_model_parallel_size, 
+    te_module.base.initialize_ub(shape = input_shape, tp_size = args.tensor_model_parallel_size,
                                  use_fp8 = (args.fp8 is not None) , ub_cfgs = ub_cfgs,)
 
 def _initialize_distributed():
     """Initialize torch.distributed and core model parallel."""
     args = get_args()
+    dist = mcr_dl.get_distributed_engine(args.dist)
 
     device_count = torch.cuda.device_count()
-    if torch.distributed.is_initialized():
+    if dist.is_initialized():
 
         if args.rank == 0:
             print(
@@ -211,8 +214,8 @@ def _initialize_distributed():
                 "skipping initialization ...",
                 flush=True,
             )
-        args.rank = torch.distributed.get_rank()
-        args.world_size = torch.distributed.get_world_size()
+        args.rank = mcr_dl.get_distributed_engine.get_rank()
+        args.world_size = mcr_dl.get_distributed_engine.get_world_size()
 
     else:
 
@@ -229,12 +232,16 @@ def _initialize_distributed():
                 args.local_rank = device
             torch.cuda.set_device(device)
         # Call the init process
-        torch.distributed.init_process_group(
-            backend=args.distributed_backend,
-            world_size=args.world_size,
-            rank=args.rank,
-            timeout=timedelta(minutes=args.distributed_timeout_minutes),
-        )
+        # torch.distributed.init_process_group(
+        #     backend=args.distributed_backend,
+        #     world_size=args.world_size,
+        #     rank=args.rank,
+        #     timeout=timedelta(minutes=args.distributed_timeout_minutes),
+        # )
+
+        mcr_dl.init_processes(dist_engine=args.distributed_engine, dist_backend=args.distributed_backend)
+
+
 
     # Set the tensor model-parallel, pipeline model-parallel, and
     # data-parallel communicators.
@@ -266,9 +273,9 @@ def _init_autoresume():
     """Set autoresume start time."""
     autoresume = get_adlr_autoresume()
     if autoresume:
-        torch.distributed.barrier()
+        mcr_dl.get_distributed_engine.barrier()
         autoresume.init()
-        torch.distributed.barrier()
+        mcr_dl.get_distributed_engine.barrier()
 
 
 def _set_random_seed(seed_, data_parallel_random_init=False):

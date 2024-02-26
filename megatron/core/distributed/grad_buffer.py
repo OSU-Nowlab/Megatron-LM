@@ -5,6 +5,7 @@ from logging import getLogger
 from typing import Dict, List
 
 import torch
+import mcr_dl
 
 from .. import parallel_state
 
@@ -54,6 +55,7 @@ class Bucket:
         overlap_grad_reduce: bool,
         use_distributed_optimizer: bool,
     ):
+        dist = mcr_dl.get_distributed_engine()
         # State for bookkeeping: params is the set of parameters this bucket is
         # responsible for, params_with_grad is the set of parameters with grads
         # available. When overlap_grad_reduce is True, communication (all-reduce
@@ -68,7 +70,7 @@ class Bucket:
         self.numel_unpadded = numel_unpadded
         self.data_parallel_group = data_parallel_group
         self.data_parallel_world_size = data_parallel_world_size
-        self.data_parallel_rank = torch.distributed.get_rank(group=data_parallel_group)
+        self.data_parallel_rank = dist.get_rank(group=data_parallel_group)
         self.overlap_grad_reduce = overlap_grad_reduce
         self.use_distributed_optimizer = use_distributed_optimizer
 
@@ -95,20 +97,21 @@ class Bucket:
             self.communication_handle is None and not self.communication_issued
         ), 'Should not have multiple communication calls in flight at once'
 
+        dist = mcr_dl.get_distributed_engine()
         self.data /= self.data_parallel_world_size
         # Use async_op only when overlap_grad_reduce is True.
         if self.use_distributed_optimizer:
             local_data_view = shard_buffer(self.data, self.data_parallel_world_size)[
                 self.data_parallel_rank
             ]
-            self.communication_handle = torch.distributed._reduce_scatter_base(
+            self.communication_handle = dist._reduce_scatter_base(
                 local_data_view,
                 self.data,
                 group=self.data_parallel_group,
                 async_op=self.overlap_grad_reduce,
             )
         else:
-            self.communication_handle = torch.distributed.all_reduce(
+            self.communication_handle = dist.all_reduce(
                 self.data, group=self.data_parallel_group, async_op=self.overlap_grad_reduce
             )
         self.communication_issued = True
@@ -185,10 +188,12 @@ class GradBuffer:
             unique_params.add(param)
         del unique_params
 
+        dist = mcr_dl.get_distributed_engine()
+
         # Store attributes that will be needed later.
         self.dtype = dtype
         self.data_parallel_group = data_parallel_group
-        self.data_parallel_world_size = torch.distributed.get_world_size(
+        self.data_parallel_world_size = dist.get_world_size(
             group=self.data_parallel_group
         )
         self.overlap_grad_reduce = overlap_grad_reduce

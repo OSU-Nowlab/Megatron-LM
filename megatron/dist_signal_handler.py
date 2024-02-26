@@ -2,17 +2,18 @@ import signal
 
 import torch
 
+import mcr_dl
 
 def get_world_size():
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        world_size = torch.distributed.get_world_size()
+    if mcr_dl.get_distributed_engine.is_available() and mcr_dl.get_distributed_engine.is_initialized():
+        world_size = mcr_dl.get_distributed_engine.get_world_size()
     else:
         world_size = 1
     return world_size
 
 
 def get_device(local_rank=None):
-    backend = torch.distributed.get_backend()
+    backend = mcr_dl.get_distributed_engine.get_backend()
     if backend == 'nccl':
         if local_rank is None:
             device = torch.device('cuda')
@@ -26,8 +27,8 @@ def get_device(local_rank=None):
 
 
 def all_gather_item(item, dtype, group=None, async_op=False, local_rank=None):
-    if not torch.distributed.is_available() or \
-       not torch.distributed.is_initialized():
+    if not mcr_dl.get_distributed_engine.is_available() or \
+       not mcr_dl.get_distributed_engine.is_initialized():
         return [item]
 
     device = get_device(local_rank)
@@ -42,7 +43,7 @@ def all_gather_item(item, dtype, group=None, async_op=False, local_rank=None):
         torch.zeros(1, dtype=tensor.dtype, device=tensor.device)
         for _ in range(group_size)
     ]
-    torch.distributed.all_gather(output_tensors, tensor, group, async_op)
+    mcr_dl.get_distributed_engine.all_gather(output_tensors, tensor, group, async_op)
     output = [elem.item() for elem in output_tensors]
     return output
 

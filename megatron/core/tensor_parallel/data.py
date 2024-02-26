@@ -1,6 +1,7 @@
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
 import torch
+import mcr_dl
 
 from megatron.core.parallel_state import (
     get_tensor_model_parallel_group,
@@ -37,7 +38,8 @@ def _build_key_size_numel_dictionaries(keys, data):
 
     # Move to GPU and broadcast.
     sizes_cuda = torch.tensor(sizes, dtype=torch.long, device='cuda')
-    torch.distributed.broadcast(
+    dist = mcr_dl.get_distributed_engine()
+    dist.broadcast(
         sizes_cuda, get_tensor_model_parallel_src_rank(), group=get_tensor_model_parallel_group()
     )
 
@@ -87,8 +89,9 @@ def broadcast_data(keys, data, datatype):
     else:
         flatten_data = torch.empty(total_numel, device=torch.cuda.current_device(), dtype=datatype)
 
+    dist = mcr_dl.get_distributed_engine()
     # Broadcast
-    torch.distributed.broadcast(
+    dist.broadcast(
         flatten_data, get_tensor_model_parallel_src_rank(), group=get_tensor_model_parallel_group()
     )
 

@@ -5,6 +5,8 @@
 import sys
 
 import torch
+import mcr_dl
+
 
 try:
     from apex.multi_tensor_apply import multi_tensor_applier
@@ -77,30 +79,32 @@ def calc_params_l2_norm(model):
         False # no per-parameter norm
     )
     norm_2 = norm * norm
+    dist = mcr_dl.get_distributed_engine()
     if mpu.get_expert_model_parallel_world_size() == 1:
         # Sum across all model-parallel GPUs(tensor + pipeline).
-        torch.distributed.all_reduce(norm_2,
-                                     op=torch.distributed.ReduceOp.SUM,
-                                     group=mpu.get_model_parallel_group())
+        dist.all_reduce(norm_2,
+                        op=dist.ReduceOp.SUM,
+                        group=mpu.get_model_parallel_group())
     else:
         # Sum across tensor, pipeline and expert model-parallel GPUs.
-        torch.distributed.all_reduce(norm_2,
-                                     op=torch.distributed.ReduceOp.SUM,
-                                     group=mpu.get_tensor_and_expert_parallel_group())
-        torch.distributed.all_reduce(norm_2,
-                                     op=torch.distributed.ReduceOp.SUM,
-                                     group=mpu.get_pipeline_model_parallel_group())
+        dist.all_reduce(norm_2,
+                        op=dist.ReduceOp.SUM,
+                        group=mpu.get_tensor_and_expert_parallel_group())
+        dist.all_reduce(norm_2,
+                        op=dist.ReduceOp.SUM,
+                        group=mpu.get_pipeline_model_parallel_group())
     return norm_2.item() ** 0.5
 
 
 def average_losses_across_data_parallel_group(losses):
     """Reduce a tensor of losses across all GPUs."""
+    dist = mcr_dl.get_distributed_engine()
     averaged_losses = torch.cat(
         [loss.clone().detach().view(1) for loss in losses])
-    torch.distributed.all_reduce(averaged_losses,
+    dist.all_reduce(averaged_losses,
                                  group=mpu.get_data_parallel_group())
     averaged_losses = averaged_losses / \
-        torch.distributed.get_world_size(group=mpu.get_data_parallel_group())
+        dist.get_world_size(group=mpu.get_data_parallel_group())
 
     return averaged_losses
 
@@ -118,14 +122,16 @@ def report_memory(name):
     string += ' | max reserved: {}'.format(
         torch.cuda.max_memory_reserved() / mega_bytes)
     if mpu.get_data_parallel_rank() == 0:
-        print("[Rank {}] {}".format(torch.distributed.get_rank(), string),
+
+        print("[Rank {}] {}".format(dist.get_rank(), string),
               flush=True)
 
 
 def print_params_min_max_norm(optimizer, iteration):
     """Print min, max, and norm of all parameters."""
     index = 0
-    rank = torch.distributed.get_rank()
+    dist = mcr_dl.get_distributed_engine()
+    rank = dist.get_rank()
     string = 'iteration, rank, index, tensor-model-parallel, min, max, norm\n'
     optimizer_ = optimizer.optimizer
     for param_group in optimizer_.param_groups:
@@ -147,13 +153,14 @@ def check_adlr_autoresume_termination(iteration, model,
 
     args = get_args()
     autoresume = get_adlr_autoresume()
+    dist = mcr_dl.get_distributed_engine()
     # Add barrier to ensure consistnecy.
-    torch.distributed.barrier()
+    dist.barrier()
     if autoresume.termination_requested():
         if args.save:
             save_checkpoint(iteration, model, optimizer, opt_param_scheduler)
         print_rank_0(">>> autoresume termination request found!")
-        if torch.distributed.get_rank() == 0:
+        if dist.get_rank() == 0:
             autoresume.request_resume()
         print_rank_0(">>> training terminated. Returning")
         sys.exit(0)
@@ -253,19 +260,22 @@ def get_batch_on_this_cp_rank(batch):
 
 def print_rank_0(message):
     """If distributed is initialized, print only on rank 0."""
-    if torch.distributed.is_initialized():
-        if torch.distributed.get_rank() == 0:
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_initialized():
+        if dist.get_rank() == 0:
             print(message, flush=True)
     else:
         print(message, flush=True)
 
 def is_last_rank():
-    return torch.distributed.get_rank() == (
-        torch.distributed.get_world_size() - 1)
+    dist = mcr_dl.get_distributed_engine()
+    return dist.get_rank() == (
+        dist.get_world_size() - 1)
 
 def print_rank_last(message):
     """If distributed is initialized, print only on last rank."""
-    if torch.distributed.is_initialized():
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_initialized():
         if is_last_rank():
             print(message, flush=True)
     else:
@@ -277,7 +287,8 @@ def get_batch_on_this_tp_rank(data_iterator):
     args = get_args()
 
     def _broadcast(item):
-       torch.distributed.broadcast(item, mpu.get_tensor_model_parallel_src_rank(), group=mpu.get_tensor_model_parallel_group())
+       dist = mcr_dl.get_distributed_engine()
+       dist.broadcast(item, mpu.get_tensor_model_parallel_src_rank(), group=mpu.get_tensor_model_parallel_group())
 
     if mpu.get_tensor_model_parallel_rank() == 0:
 
@@ -325,11 +336,11 @@ def get_batch_on_this_tp_rank(data_iterator):
            _broadcast(loss_mask)
            _broadcast(attention_mask)
            _broadcast(position_ids)
- 
+
        elif mpu.is_pipeline_first_stage():
            labels=None
            loss_mask=None
-   
+
            _broadcast(tokens)
            _broadcast(attention_mask)
            _broadcast(position_ids)
@@ -337,11 +348,11 @@ def get_batch_on_this_tp_rank(data_iterator):
        elif mpu.is_pipeline_last_stage():
            tokens=None
            position_ids=None
-    
+
            _broadcast(labels)
            _broadcast(loss_mask)
            _broadcast(attention_mask)
- 
+
        batch = {
            'tokens': tokens,
            'labels': labels,

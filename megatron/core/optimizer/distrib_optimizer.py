@@ -7,6 +7,8 @@ import itertools
 from logging import getLogger
 
 import torch
+import mcr_dl
+
 from apex.optimizers import FusedAdam as Adam
 
 from .. import parallel_state, tensor_parallel
@@ -65,7 +67,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         grad_buffers: the implementation of the distributed optimizer is
             centered on using the contiguous grad buffer for communicating
             grads & params between the model state and the optimizer state.
-            You can find a more detailed description in this document 
+            You can find a more detailed description in this document
             https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
             .
     """
@@ -687,6 +689,8 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
             "per_bucket_numel": self.per_bucket_numel,
             "per_bucket_numel_unpadded": self.per_bucket_numel_unpadded,
         }
+
+        dist = mcr_dl.get_distributed_engine()
         for gbuf_idx, gbuf_range_maps in enumerate(self.gbuf_ranges):
 
             # Iterate grad buffers (by data type).
@@ -739,7 +743,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                             recv_tensors = None
 
                         # Gather.
-                        torch.distributed.gather(
+                        dist.gather(
                             send_tensor,
                             recv_tensors,
                             data_parallel_global_ranks[0],
@@ -790,6 +794,8 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
             with_context_parallel=True
         )
         data_parallel_global_ranks = list(parallel_state._DATA_PARALLEL_GLOBAL_RANKS_WITH_CP)
+
+        dist = mcr_dl.get_distributed_engine()
 
         # Scatter tensors to all DP ranks.
         for gbuf_idx, gbuf_range_maps in enumerate(self.gbuf_ranges):
@@ -870,7 +876,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                             send_tensors = None
 
                         # Scatter.
-                        torch.distributed.scatter(
+                        dist.scatter(
                             recv_tensor,
                             send_tensors,
                             data_parallel_global_ranks[0],
@@ -994,6 +1000,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         tensors are dynamically allocated. After the all-gather, the params
         can be copied from the param buffer to the param.
         """
+        dist = mcr_dl.get_distributed_engine()
         async_op = self.overlap_param_gather and not force_sync
         if self.update_successful:
             data_parallel_rank = parallel_state.get_data_parallel_rank(with_context_parallel=True)
@@ -1008,7 +1015,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                 all_gather_handle_index
             ]
             assert all_gather_handle_index < len(self.all_gather_handles)
-            all_gather_handle = torch.distributed._all_gather_base(
+            all_gather_handle = dist._all_gather_base(
                 pbuf, pbuf_views[data_parallel_rank], group=data_parallel_group, async_op=async_op,
             )
             self.all_gather_handles[all_gather_handle_index] = all_gather_handle

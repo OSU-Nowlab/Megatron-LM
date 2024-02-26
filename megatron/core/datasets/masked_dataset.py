@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple, Union
 
 import numpy
 import torch
+import mcr_dl
 
 from megatron.core.datasets.blended_megatron_dataset_config import BlendedMegatronDatasetConfig
 from megatron.core.datasets.indexed_dataset import MMapIndexedDataset
@@ -169,7 +170,9 @@ class MaskedWordPieceDataset(MegatronDataset):
 
         num_epochs = numpy.iinfo(numpy.int32).max - 1
 
-        if not cache_hit and torch.distributed.get_rank() == 0:
+        dist = mcr_dl.get_distributed_engine()
+
+        if not cache_hit and dist.get_rank() == 0:
             log_single_rank(
                 logger,
                 logging.INFO,

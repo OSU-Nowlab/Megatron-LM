@@ -6,6 +6,10 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__),
                                              os.path.pardir)))
 import socket
+
+import torch
+import mcr_dl
+
 from megatron import get_args
 from megatron import print_rank_0
 from megatron.core import mpu
@@ -17,7 +21,6 @@ from megatron.arguments import core_transformer_config_from_args
 from megatron.text_generation_server import MegatronServer
 from megatron.text_generation import generate_and_post_process
 from megatron.text_generation import beam_search_and_post_process
-import torch
 
 def model_provider(pre_process=True, post_process=True):
     """Build the model."""
@@ -64,7 +67,8 @@ if __name__ == "__main__":
 
     while True:
         choice = torch.tensor(1, dtype=torch.long, device='cuda')
-        torch.distributed.broadcast(choice, 0)
+        dist = mcr_dl.get_distributed_engine()
+        dist.broadcast(choice, 0)
         if choice[0].item() == 0:
             try:
                 generate_and_post_process(model)

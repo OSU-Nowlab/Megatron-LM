@@ -17,6 +17,7 @@ import time
 # The earliest we can measure the start time.
 _TRAIN_START_TIME = time.time()
 import torch
+import mcr_dl
 
 from megatron import get_args
 from megatron import get_signal_handler
@@ -55,7 +56,8 @@ from megatron.model.vision.knn_monitor import compute_feature_bank
 
 def print_datetime(string):
     """Note that this call will sync across all ranks."""
-    torch.distributed.barrier()
+    dist = mcr_dl.get_distributed_engine()
+    dist.barrier()
     time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print_rank_0('[' + string + '] datetime: {} '.format(time_str))
 
@@ -84,8 +86,10 @@ def append_to_progress_log(string):
     if args.save is None:
         return
     progress_log_filename = os.path.join(args.save, "progress.txt")
-    torch.distributed.barrier()
-    if torch.distributed.get_rank() == 0:
+    dist = mcr_dl.get_distributed_engine()
+
+    dist.barrier()
+    if dist.get_rank() == 0:
         with open(progress_log_filename, 'a') as f:
             job_id = os.getenv('SLURM_JOB_ID', '')
             num_gpus = args.world_size
@@ -194,8 +198,9 @@ def pretrain(train_valid_test_dataset_provider,
     start_time_tensor = torch.tensor([_TRAIN_START_TIME],
                                      dtype=torch.double,
                                      device='cuda')
-    torch.distributed.all_reduce(start_time_tensor,
-                                 op=torch.distributed.ReduceOp.MIN)
+    dist = mcr_dl.get_distributed_engine()
+    dist.all_reduce(start_time_tensor,
+                                 op=dist.ReduceOp.MIN)
     _TRAIN_START_TIME = start_time_tensor.item()
     print_rank_0('time to initialize megatron (seconds): {:.3f}'.format(
         time.time() - _TRAIN_START_TIME))
@@ -793,7 +798,8 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
         print_rank_last(log_string)
         if report_memory_flag and learning_rate > 0.:
             # Report memory after optimizer state has been initialized.
-            if torch.distributed.get_rank() == 0:
+            dist = mcr_dl.get_distributed_engine()
+            if dist.get_rank() == 0:
                 num_microbatches = get_num_microbatches()
                 report_theoretical_memory(args, num_microbatches=num_microbatches, verbose=True)
             report_memory('(after {} iterations)'.format(iteration))
@@ -945,9 +951,10 @@ def train(forward_step_func, model, optimizer, opt_param_scheduler,
             })
 
     while iteration < args.train_iters:
+        dist = mcr_dl.get_distributed_engine()
         if args.profile and \
            iteration == args.profile_step_start and \
-           torch.distributed.get_rank() in args.profile_ranks:
+           dist.get_rank() in args.profile_ranks:
             torch.cuda.cudart().cudaProfilerStart()
             torch.autograd.profiler.emit_nvtx(record_shapes=True).__enter__()
 
@@ -1053,8 +1060,8 @@ def train(forward_step_func, model, optimizer, opt_param_scheduler,
             done_cuda = torch.tensor(
                 [train_time > args.exit_duration_in_mins],
                 dtype=torch.int, device='cuda')
-            torch.distributed.all_reduce(
-                done_cuda, op=torch.distributed.ReduceOp.MAX)
+            dist.all_reduce(
+                done_cuda, op=dist.ReduceOp.MAX)
             done = done_cuda.item()
             if done:
                 if not saved_checkpoint:
@@ -1071,14 +1078,14 @@ def train(forward_step_func, model, optimizer, opt_param_scheduler,
                 save_checkpoint_and_time(iteration, model, optimizer,
                                          opt_param_scheduler,
                                          num_floating_point_operations_so_far)
-            torch.distributed.barrier()
+            dist.barrier()
             print_datetime('exiting program at iteration {}'.format(iteration))
             exit = True
             break
 
         if args.profile and \
            iteration == args.profile_step_end and \
-           torch.distributed.get_rank() in args.profile_ranks:
+           dist.get_rank() in args.profile_ranks:
             torch.cuda.cudart().cudaProfilerStop()
 
         if args.manual_gc:
@@ -1115,6 +1122,7 @@ def evaluate(forward_step_func,
     """Evaluation."""
     args = get_args()
     timers = get_timers()
+    dist = mcr_dl.get_distributed_engine()
 
     timers('evaluate', log_level=0).start(barrier=True)
 
@@ -1173,8 +1181,8 @@ def evaluate(forward_step_func,
                 done_cuda = torch.tensor(
                     [train_time > args.exit_duration_in_mins],
                     dtype=torch.int, device='cuda')
-                torch.distributed.all_reduce(
-                    done_cuda, op=torch.distributed.ReduceOp.MAX)
+                dist.all_reduce(
+                    done_cuda, op=dist.ReduceOp.MAX)
                 done = done_cuda.item()
                 if done:
                     print_rank_0('Exiting during evaluation, timelimit reached')
@@ -1335,7 +1343,8 @@ def build_train_valid_test_data_loaders(
     else:
         flags = torch.tensor([0, 0, 0], dtype=torch.long, device='cuda')
 
-    torch.distributed.broadcast(flags, 0)
+    dist = mcr_dl.get_distributed_engine()
+    dist.broadcast(flags, 0)
 
     args.do_train = getattr(args, "do_train", False) or flags[0].item()
     args.do_valid = getattr(args, "do_valid", False) or flags[1].item()

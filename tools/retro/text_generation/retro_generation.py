@@ -115,8 +115,10 @@ def retro_generate_tokens_probs_and_return_on_first_stage(
             sizes_list = None
             neighbor_tokens_cuda_long_tensor = None
 
+            dist = mcr_dl.get_distributed_engine()
+
             # get the chunks for retrieval
-            if torch.distributed.get_rank() == 0:
+            if dist.get_rank() == 0:
                 neighbor_tokens = neighbours_array
                 neighbor_tokens_cuda_long_tensor = torch.cuda.LongTensor(
                     neighbor_tokens.reshape((-1, retro_args.retro_gpt_retrieved_length)))

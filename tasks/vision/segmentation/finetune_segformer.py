@@ -5,6 +5,8 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+import mcr_dl
+
 from functools import partial
 from megatron import get_args, get_timers
 from megatron import print_rank_0, print_rank_last
@@ -91,7 +93,7 @@ def segmentation():
         logits = output_tensor.contiguous().float()
         logits = resize(logits, size=masks.shape[1:],
                         mode='bilinear', align_corners=False)
-      
+
         # Cross-entropy loss.
         # weight = calculate_weight(masks, num_classes)
         loss = F.cross_entropy(logits, masks, ignore_index=ignore_index)
@@ -183,7 +185,8 @@ def segmentation():
         # Reduce.
         if mpu.is_pipeline_last_stage():
             performs_tensor = torch.cuda.FloatTensor(performs)
-            torch.distributed.all_reduce(performs_tensor,
+            dist = mcr_dl.get_distributed_engine()
+            dist.all_reduce(performs_tensor,
                                          group=mpu.get_data_parallel_group())
             hist = performs_tensor.cpu().numpy()
             iu, acc, acc_cls = calculate_iou(hist)

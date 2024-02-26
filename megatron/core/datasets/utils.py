@@ -6,6 +6,7 @@ from typing import Any, List
 
 import numpy
 import torch
+import mcr_dl
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,9 @@ def log_single_rank(logger: logging.Logger, *args: Any, rank: int = 0, **kwargs:
 
         kwargs (Dict[str, Any]): All logging.Logger.log keyword arguments
     """
-    if torch.distributed.is_initialized():
-        if torch.distributed.get_rank() == rank:
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_initialized():
+        if dist.get_rank() == rank:
             logger.log(*args, **kwargs)
     else:
         logger.log(*args, **kwargs)

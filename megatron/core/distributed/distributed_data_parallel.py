@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from typing import Dict
 
 import torch
+import mcr_dl
 
 from .. import parallel_state
 from ..transformer.module import MegatronModule
@@ -86,9 +87,11 @@ class DistributedDataParallel(MegatronModule):
                 params.append(param)
                 grad_dtype_to_params[dtype] = params
 
+
+        dist = mcr_dl.get_distributed_engine()
         # Allocate the grad buffers and map the grads.
         # The grad buffer under the hood creates buckets as appropriate based on bucket_size.
-        self.data_parallel_world_size = torch.distributed.get_world_size(group=data_parallel_group)
+        self.data_parallel_world_size = dist.get_world_size(group=data_parallel_group)
         for dtype, params in grad_dtype_to_params.items():
             self.grad_buffers[dtype] = GradBuffer(
                 dtype,
@@ -217,8 +220,9 @@ class DistributedDataParallel(MegatronModule):
         """
         Syncs parameters across all DP ranks.
         """
+        dist = mcr_dl.get_distributed_engine()
         for param in self.module.parameters():
-            torch.distributed.broadcast(
+            dist.broadcast(
                 param.data,
                 src=parallel_state.get_data_parallel_src_rank(with_context_parallel=True),
                 group=parallel_state.get_data_parallel_group(with_context_parallel=True),

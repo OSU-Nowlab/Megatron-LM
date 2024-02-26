@@ -37,8 +37,9 @@ class TempNamedDir(TemporaryDirectory):
     def cleanup(self, override_sync: Optional[bool] = None) -> None:
         sync = self.sync if override_sync is None else override_sync
         if sync :
-            import torch
-            torch.distributed.barrier()
+            import mcr_dl
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier()
 
         if Utils.rank == 0:
             super().cleanup()

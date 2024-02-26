@@ -299,7 +299,8 @@ class DiskDataParallelBertEmbedder:
 
             # Synchronize progress across all ranks. (for easier observation)
             print_rank_0(" > waiting for other ranks to finish block.")
-            torch.distributed.barrier()
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier()
 
     def embed_text_dataset(self, name, workdir, text_dataset):
         '''Embed a text dataset.'''
@@ -317,7 +318,8 @@ class DiskDataParallelBertEmbedder:
             validate=validate)
 
         # Prevent missing file race condition.
-        torch.distributed.barrier()
+        dist = mcr_dl.get_distributed_engine()
+        dist.barrier()
 
         # Embed batches.
         self.embed_text_blocks(name, workdir, text_dataset,

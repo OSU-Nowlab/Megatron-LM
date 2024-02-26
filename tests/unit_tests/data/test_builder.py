@@ -7,11 +7,12 @@ import torch
 from megatron.core.datasets.utils import compile_helpers
 from tests.unit_tests.test_utilities import Utils
 
-if torch.distributed.is_available():
+dist = mcr_dl.get_distributed_engine()
+if dist.is_available():
     Utils.initialize_distributed()
-    if torch.distributed.get_rank() == 0:
+    if dist.get_rank() == 0:
         compile_helpers()
-    torch.distributed.barrier()
+    dist.barrier()
 else:
     compile_helpers()
 

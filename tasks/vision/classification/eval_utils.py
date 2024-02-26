@@ -6,6 +6,7 @@ import os
 from functools import partial
 
 import torch
+import mcr_dl
 
 from megatron import get_args
 from megatron import print_rank_0, print_rank_last
@@ -107,8 +108,8 @@ def calculate_correct_answers(model, dataloader, epoch):
     # Reduce.
     if mpu.is_pipeline_last_stage():
         unreduced = torch.cuda.LongTensor([correct, total])
-        torch.distributed.all_reduce(unreduced,
-                                     group=mpu.get_data_parallel_group())
+        dist = mcr_dl.get_distributed_engine()
+        dist.all_reduce(unreduced, group=mpu.get_data_parallel_group())
 
         # Print on screen.
         correct_ans = unreduced[0].item()

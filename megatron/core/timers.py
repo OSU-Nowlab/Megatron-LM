@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from typing import List
 
 import torch
+import mcr_dl
 
 
 class TimerBase(ABC):
@@ -89,7 +90,8 @@ class Timer(TimerBase):
         """
         assert not self._started, 'timer has already been started'
         if barrier:
-            torch.distributed.barrier(group=self._barrier_group)
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier(group=self._barrier_group)
         torch.cuda.synchronize()
         self._start_time = time.time()
         self._started = True
@@ -102,7 +104,8 @@ class Timer(TimerBase):
         """
         assert self._started, 'timer is not started'
         if barrier:
-            torch.distributed.barrier(group=self._barrier_group)
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier(group=self._barrier_group)
         torch.cuda.synchronize()
         elapsed = time.time() - self._start_time
         self._elapsed += elapsed
@@ -152,7 +155,7 @@ class Timers:
         """Initialize group of timers.
 
         Args:
-            log_level (int): Log level to control what timers are enabled.            
+            log_level (int): Log level to control what timers are enabled.
             log_option (str): Setting for logging statistics over ranks for all the timers. Allowed: ['max', 'minmax', 'all'].
         """
         self._log_level = log_level
@@ -213,13 +216,13 @@ class Timers:
         Returns:
             torch.tensor: Tensor of size [world_size, len(names)] with times in float.
         """
-
+        dist = mcr_dl.get_distributed_engine()
         # First make sure all the callers are in sync.
         if barrier:
-            torch.distributed.barrier()
+            dist.barrier()
 
-        world_size = torch.distributed.get_world_size()
-        rank = torch.distributed.get_rank()
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
 
         # Here we can use gather on the rank we want to print the
         # timing, however, there is no gather_base support in
@@ -238,7 +241,7 @@ class Timers:
                 rank_name_to_time[rank, i] = self._timers[name].elapsed(reset=reset)
 
         # See the note above for why we are not using gather.
-        torch.distributed._all_gather_base(
+        dist._all_gather_base(
             rank_name_to_time.view(-1), rank_name_to_time[rank, :].view(-1)
         )
 
@@ -283,12 +286,13 @@ class Timers:
     def _get_all_ranks_time_string(self, names, reset, barrier, normalizer):
         """Report times across all ranks."""
         rank_name_to_time = self._get_elapsed_time_all_ranks(names, reset, barrier)
+        dist = mcr_dl.get_distributed_engine()
 
         output_string = 'times across ranks (ms):'
         no_reported_timing = True
         for i, name in enumerate(names):
             not_yet_found = True
-            for rank in range(torch.distributed.get_world_size()):
+            for rank in range(dist.get_world_size()):
                 if rank_name_to_time[rank, i] > 0:
                     no_reported_timing = False
                     if not_yet_found:
@@ -351,7 +355,7 @@ class Timers:
         barrier: bool = False,
     ):
         """logs the timers passed in names to stdout. Example usage is to log average per step value for timer 'foo',
-          this function can be called with normalizer factor set to logging interval. 
+          this function can be called with normalizer factor set to logging interval.
 
         Args:
             names (List[str]): Names of the timers to log.
@@ -362,10 +366,11 @@ class Timers:
         """
 
         output_string = self.get_all_timers_string(names, normalizer, reset, barrier)
+        dist = mcr_dl.get_distributed_engine()
         # If no input rank is provided, log on last rank.
         if rank is None:
-            rank = torch.distributed.get_world_size() - 1
-        if rank == torch.distributed.get_rank() and output_string is not None:
+            rank = dist.get_world_size() - 1
+        if rank == dist.get_rank() and output_string is not None:
             print(output_string, flush=True)
 
     def write(

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
 import torch
+import mcr_dl
 
 from megatron.core.datasets.megatron_tokenizer import MegatronTokenizer
 from megatron.core.datasets.utils import Split, log_single_rank, normalize
@@ -78,8 +79,9 @@ class BlendedMegatronDatasetConfig:
     def __post_init__(self) -> None:
         """Do asserts and set fields post init
         """
-        if torch.distributed.is_initialized():
-            gb_rank = torch.distributed.get_rank()
+        dist = mcr_dl.get_distributed_engine()
+        if dist.is_initialized():
+            gb_rank = dist.get_rank()
             vp_rank = get_virtual_pipeline_model_parallel_rank()
             if gb_rank == 0 and (vp_rank == 0 or vp_rank is None):
                 assert (

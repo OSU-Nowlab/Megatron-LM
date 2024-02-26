@@ -4,6 +4,7 @@ from typing import List
 
 import torch
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+import mcr_dl
 
 from .. import parallel_state
 from ..transformer.transformer_config import TransformerConfig
@@ -35,10 +36,11 @@ def _allreduce_word_embedding_grads(model: List[torch.nn.Module], config: Transf
         # attributes already, causing get_attr_wrapped_model() to not unwrap anything here.
         # TODO: Clean this up once the wrapper classes inherit from core MegatronModule.
         model_module = get_attr_wrapped_model(model_module, 'pre_process', return_model_obj=True)
+        dist = mcr_dl.get_distributed_engine()
         if model_module.share_embeddings_and_output_weights:
             weight = model_module.shared_embedding_or_output_weight()
             grad = weight.main_grad
-            torch.distributed.all_reduce(grad, group=parallel_state.get_embedding_group())
+            dist.all_reduce(grad, group=parallel_state.get_embedding_group())
 
 
 def _allreduce_position_embedding_grads(model: List[torch.nn.Module], config: TransformerConfig):
@@ -56,7 +58,8 @@ def _allreduce_position_embedding_grads(model: List[torch.nn.Module], config: Tr
         grad = get_attr_wrapped_model(
             model_module, 'language_model.embedding.position_embeddings.weight.main_grad'
         )
-        torch.distributed.all_reduce(grad, group=parallel_state.get_position_embedding_group())
+        dist = mcr_dl.get_distributed_engine()
+        dist.all_reduce(grad, group=parallel_state.get_position_embedding_group())
 
 
 def _allreduce_embedding_grads(model: List[torch.nn.Module], config: TransformerConfig):
@@ -82,7 +85,8 @@ def _allreduce_layernorm_grads(model: List[torch.nn.Module], config: Transformer
                     grad = param.main_grad
                     grads.append(grad.data)
         coalesced = _flatten_dense_tensors(grads)
-        torch.distributed.all_reduce(
+        dist = mcr_dl.get_distributed_engine()
+        dist.all_reduce(
             coalesced, group=parallel_state.get_tensor_model_parallel_group()
         )
         for buf, synced in zip(grads, _unflatten_dense_tensors(coalesced, grads)):
@@ -106,7 +110,8 @@ def _allreduce_expert_grads(model: List[torch.nn.Module], config: TransformerCon
                     grad = param.main_grad
                     grads.append(grad.data)
         coalesced = _flatten_dense_tensors(grads)
-        torch.distributed.all_reduce(
+        dist = mcr_dl.get_distributed_engine()
+        dist.all_reduce(
             coalesced, group=parallel_state.get_data_modulo_expert_parallel_group()
         )
         for buf, synced in zip(grads, _unflatten_dense_tensors(coalesced, grads)):

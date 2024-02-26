@@ -8,6 +8,8 @@ from logging import getLogger
 
 import amp_C
 import torch
+import mcr_dl
+
 from apex.multi_tensor_apply import multi_tensor_applier
 
 from .. import parallel_state, tensor_parallel
@@ -263,9 +265,11 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
             main_grads, self.found_inf, self.grad_scaler.inv_scale
         )
 
+        dist = mcr_dl.get_distributed_engine()
+
         # Update across all model parallel instances.
-        torch.distributed.all_reduce(
-            self.found_inf, op=torch.distributed.ReduceOp.MAX, group=self.get_model_parallel_group()
+        dist.all_reduce(
+            self.found_inf, op=dist.ReduceOp.MAX, group=self.get_model_parallel_group()
         )
 
         # Check for nan.
@@ -628,7 +632,7 @@ class FP32Optimizer(MegatronOptimizer):
 
 class ChainedOptimizer(MegatronOptimizer):
     """ChainedOptimizer is designed for chain of multiple optimizers.
-    
+
     These optimizers are responsible for different parts of multiple models for
     a training task and will be executed one by one when the model is updated.
 

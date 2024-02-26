@@ -1,6 +1,7 @@
 import logging
 
 import torch
+import mcr_dl
 from torch import Tensor
 
 from megatron.core import parallel_state, tensor_parallel
@@ -80,10 +81,11 @@ class LanguageModule(MegatronModule):
 
         # Ensure that first and last stages have the same initial parameter
         # values.
-        if torch.distributed.is_initialized():
+        dist = mcr_dl.get_distributed_engine()
+        if dist.is_initialized():
             if parallel_state.is_rank_in_embedding_group():
                 weight = self.shared_embedding_or_output_weight()
-                torch.distributed.all_reduce(
+                dist.all_reduce(
                     weight.data, group=parallel_state.get_embedding_group()
                 )
 

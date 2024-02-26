@@ -5,6 +5,7 @@ import os
 import psutil
 import time
 import torch
+import mcr_dl
 from tqdm import tqdm
 
 from megatron import get_retro_args, print_rank_0
@@ -83,7 +84,7 @@ def query_embeddings(db_dataset, index,
         sample_dataset_idx = sample["dataset_idx"].item()
         sample_doc_ids = sample["doc_ids"].tolist()
         sample_doc_tuples = [(sample_dataset_idx, d) for d in sample_doc_ids]
-        
+
         # Get valid neighbors (!= -1).
         query_row = [ i for i in query_neighbor_ids[chunk_id-min_chunk_id]
                       if i >= 0 ]
@@ -213,7 +214,8 @@ def query_dataset_neighbors(db_dataset, query_dataset,
 
         # Synchronize progress across all ranks. (for easier observation)
         print_rank_0(" > waiting for other ranks to finish block.")
-        torch.distributed.barrier()
+        dist = mcr_dl.get_distributed_engine()
+        dist.barrier()
 
 
 def query_pretraining_neighbors():

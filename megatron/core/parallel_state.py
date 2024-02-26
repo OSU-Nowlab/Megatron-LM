@@ -6,6 +6,7 @@ import os
 from typing import Optional
 
 import torch
+import mcr_dl
 
 from .utils import GlobalMemoryBuffer
 
@@ -84,7 +85,7 @@ def get_nccl_options(pg_name, nccl_comm_cfgs):
     When an option (e.g., max_ctas) is not found in the config, use the NCCL default setting.
     """
     if pg_name in nccl_comm_cfgs:
-        nccl_options = torch.distributed.ProcessGroupNCCL.Options()
+        nccl_options = mcr_dl.get_distributed_engine().ProcessGroupNCCL.Options()
         nccl_options.config.cga_cluster_size = nccl_comm_cfgs[pg_name].get('cga_cluster_size', 4)
         nccl_options.config.max_ctas = nccl_comm_cfgs[pg_name].get('max_ctas', 32)
         nccl_options.config.min_ctas = nccl_comm_cfgs[pg_name].get('min_ctas', 1)
@@ -194,8 +195,9 @@ def initialize_model_parallel(
 
     """
     # Get world size and rank. Ensure some consistencies.
-    assert torch.distributed.is_initialized()
-    world_size: int = torch.distributed.get_world_size()
+    dist = mcr_dl.get_distributed_engine()
+    assert dist.is_initialized()
+    world_size: int = dist.get_world_size()
 
     if (
         world_size
@@ -239,7 +241,7 @@ def initialize_model_parallel(
         global _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
         _PIPELINE_MODEL_PARALLEL_SPLIT_RANK = pipeline_model_parallel_split_rank
 
-    rank = torch.distributed.get_rank()
+    rank = dist.get_rank()
 
     nccl_comm_cfgs = {}
     if nccl_communicator_config_path is not None:
@@ -270,10 +272,10 @@ def initialize_model_parallel(
             ranks = range(
                 start_rank + j, end_rank, context_parallel_size * tensor_model_parallel_size
             )
-            group = torch.distributed.new_group(
+            group = dist.new_group(
                 ranks, pg_options=get_nccl_options('dp', nccl_comm_cfgs)
             )
-            group_gloo = torch.distributed.new_group(ranks, backend="gloo")
+            group_gloo = dist.new_group(ranks, backend="gloo")
             if rank in ranks:
                 _DATA_PARALLEL_GROUP = group
                 _DATA_PARALLEL_GROUP_GLOO = group_gloo
@@ -281,10 +283,10 @@ def initialize_model_parallel(
         for j in range(tensor_model_parallel_size):
             ranks_with_cp = range(start_rank + j, end_rank, tensor_model_parallel_size)
             all_data_parallel_group_ranks_with_cp.append(list(ranks_with_cp))
-            group_with_cp = torch.distributed.new_group(
+            group_with_cp = dist.new_group(
                 ranks_with_cp, pg_options=get_nccl_options('dp_cp', nccl_comm_cfgs)
             )
-            group_with_cp_gloo = torch.distributed.new_group(ranks_with_cp, backend="gloo")
+            group_with_cp_gloo = dist.new_group(ranks_with_cp, backend="gloo")
             if rank in ranks_with_cp:
                 _DATA_PARALLEL_GROUP_WITH_CP = group_with_cp
                 _DATA_PARALLEL_GROUP_WITH_CP_GLOO = group_with_cp_gloo
@@ -303,7 +305,7 @@ def initialize_model_parallel(
                 "will fall back to non-SHARP operators. To enable SHARP, "
                 "`#SBATCH_NETWORK=sharp` should be set in the sbatch script."
             )
-        torch.distributed.barrier(
+        dist.barrier(
             group=get_data_parallel_group(with_context_parallel=context_parallel_size > 1),
             device_ids=[torch.cuda.current_device()],
         )
@@ -326,7 +328,7 @@ def initialize_model_parallel(
             )
             for k in range(tensor_model_parallel_size):
                 ranks = range(start_rank + k, end_rank, tensor_model_parallel_size)
-                group = torch.distributed.new_group(
+                group = dist.new_group(
                     ranks, pg_options=get_nccl_options('cp', nccl_comm_cfgs)
                 )
                 if rank in ranks:
@@ -341,7 +343,7 @@ def initialize_model_parallel(
             data_parallel_group_ranks_with_cp[i]
             for data_parallel_group_ranks_with_cp in all_data_parallel_group_ranks_with_cp
         ]
-        group = torch.distributed.new_group(
+        group = dist.new_group(
             ranks, pg_options=get_nccl_options('mp', nccl_comm_cfgs)
         )
         if rank in ranks:
@@ -354,7 +356,7 @@ def initialize_model_parallel(
     ), 'tensor model parallel group is already initialized'
     for i in range(num_tensor_model_parallel_groups):
         ranks = range(i * tensor_model_parallel_size, (i + 1) * tensor_model_parallel_size)
-        group = torch.distributed.new_group(
+        group = dist.new_group(
             ranks, pg_options=get_nccl_options('tp', nccl_comm_cfgs)
         )
         if rank in ranks:
@@ -375,7 +377,7 @@ def initialize_model_parallel(
     assert _POSITION_EMBEDDING_GROUP is None, 'position embedding group is already initialized'
     for i in range(num_pipeline_model_parallel_groups):
         ranks = range(i, world_size, num_pipeline_model_parallel_groups)
-        group = torch.distributed.new_group(
+        group = dist.new_group(
             ranks, pg_options=get_nccl_options('pp', nccl_comm_cfgs)
         )
         if rank in ranks:
@@ -399,7 +401,7 @@ def initialize_model_parallel(
             embedding_ranks = ranks
             position_embedding_ranks = ranks
 
-        group = torch.distributed.new_group(
+        group = dist.new_group(
             embedding_ranks, pg_options=get_nccl_options('embd', nccl_comm_cfgs)
         )
         if rank in embedding_ranks:
@@ -407,7 +409,7 @@ def initialize_model_parallel(
         if rank in ranks:
             _EMBEDDING_GLOBAL_RANKS = embedding_ranks
 
-        group = torch.distributed.new_group(
+        group = dist.new_group(
             position_embedding_ranks, pg_options=get_nccl_options('embd', nccl_comm_cfgs)
         )
         if rank in position_embedding_ranks:
@@ -427,7 +429,7 @@ def initialize_model_parallel(
         start_rank = i * tensor_and_data_group_size_with_cp
         end_rank = start_rank + tensor_and_data_group_size_with_cp
         ranks = range(start_rank, end_rank)
-        group = torch.distributed.new_group(
+        group = dist.new_group(
             ranks, pg_options=get_nccl_options('tp_dp_cp', nccl_comm_cfgs)
         )
         if rank in ranks:
@@ -443,7 +445,7 @@ def initialize_model_parallel(
                 )
                 end_rank = start_rank + tensor_model_parallel_size
                 ranks = ranks + list(range(start_rank, end_rank))
-            group = torch.distributed.new_group(
+            group = dist.new_group(
                 ranks, pg_options=get_nccl_options('tp_dp', nccl_comm_cfgs)
             )
             if rank in ranks:
@@ -467,7 +469,7 @@ def initialize_model_parallel(
             start_rank = i * tensor_and_data_group_size + j * tensor_and_expert_group_size
             end_rank = i * tensor_and_data_group_size + (j + 1) * tensor_and_expert_group_size
             ranks = range(start_rank, end_rank)
-            group = torch.distributed.new_group(
+            group = dist.new_group(
                 ranks, pg_options=get_nccl_options('tp_exp', nccl_comm_cfgs)
             )
             if rank in ranks:
@@ -478,7 +480,7 @@ def initialize_model_parallel(
         end_rank = (i + 1) * tensor_and_data_group_size
         for j in range(tensor_and_expert_group_size):
             ranks = range(start_rank + j, end_rank, tensor_and_expert_group_size)
-            group = torch.distributed.new_group(
+            group = dist.new_group(
                 ranks, pg_options=get_nccl_options('dp_modulo_exp', nccl_comm_cfgs)
             )
             if rank in ranks:
@@ -652,7 +654,8 @@ def get_tensor_model_parallel_world_size():
     global _MPU_TENSOR_MODEL_PARALLEL_WORLD_SIZE
     if _MPU_TENSOR_MODEL_PARALLEL_WORLD_SIZE is not None:
         return _MPU_TENSOR_MODEL_PARALLEL_WORLD_SIZE
-    return torch.distributed.get_world_size(group=get_tensor_model_parallel_group())
+    dist = mcr_dl.get_distributed_engine()
+    return dist.get_world_size(group=get_tensor_model_parallel_group())
 
 
 def get_pipeline_model_parallel_world_size():
@@ -660,7 +663,8 @@ def get_pipeline_model_parallel_world_size():
     global _MPU_PIPELINE_MODEL_PARALLEL_WORLD_SIZE
     if _MPU_PIPELINE_MODEL_PARALLEL_WORLD_SIZE is not None:
         return _MPU_PIPELINE_MODEL_PARALLEL_WORLD_SIZE
-    return torch.distributed.get_world_size(group=get_pipeline_model_parallel_group())
+    dist = mcr_dl.get_distributed_engine()
+    return dist.get_world_size(group=get_pipeline_model_parallel_group())
 
 
 def set_expert_model_parallel_rank(rank):
@@ -692,7 +696,8 @@ def get_tensor_model_parallel_rank():
     global _MPU_TENSOR_MODEL_PARALLEL_RANK
     if _MPU_TENSOR_MODEL_PARALLEL_RANK is not None:
         return _MPU_TENSOR_MODEL_PARALLEL_RANK
-    return torch.distributed.get_rank(group=get_tensor_model_parallel_group())
+    dist = mcr_dl.get_distributed_engine()
+    return dist.get_rank(group=get_tensor_model_parallel_group())
 
 
 def get_pipeline_model_parallel_rank():
@@ -700,7 +705,8 @@ def get_pipeline_model_parallel_rank():
     global _MPU_PIPELINE_MODEL_PARALLEL_RANK
     if _MPU_PIPELINE_MODEL_PARALLEL_RANK is not None:
         return _MPU_PIPELINE_MODEL_PARALLEL_RANK
-    return torch.distributed.get_rank(group=get_pipeline_model_parallel_group())
+    dist = mcr_dl.get_distributed_engine()
+    return dist.get_rank(group=get_pipeline_model_parallel_group())
 
 
 def get_pipeline_model_parallel_split_rank():
@@ -735,7 +741,8 @@ def is_pipeline_last_stage(ignore_virtual=False):
 
 def is_rank_in_embedding_group(ignore_virtual=False):
     """Return true if current rank is in embedding group, False otherwise."""
-    rank = torch.distributed.get_rank()
+    dist = mcr_dl.get_distributed_engine()
+    rank = dist.get_rank()
     global _EMBEDDING_GLOBAL_RANKS
     if ignore_virtual:
         return rank in _EMBEDDING_GLOBAL_RANKS
@@ -751,7 +758,8 @@ def is_rank_in_embedding_group(ignore_virtual=False):
 
 def is_rank_in_position_embedding_group():
     """Return true if current rank is in position embedding group, False otherwise."""
-    rank = torch.distributed.get_rank()
+    dist = mcr_dl.get_distributed_engine()
+    rank = dist.get_rank()
     global _POSITION_EMBEDDING_GLOBAL_RANKS
     return rank in _POSITION_EMBEDDING_GLOBAL_RANKS
 
@@ -815,7 +823,8 @@ def get_virtual_pipeline_model_parallel_world_size():
 def get_tensor_model_parallel_src_rank():
     """Calculate the global rank corresponding to the first local rank
     in the tensor model parallel group."""
-    global_rank = torch.distributed.get_rank()
+    dist = mcr_dl.get_distributed_engine()
+    global_rank = dist.get_rank()
     local_world_size = get_tensor_model_parallel_world_size()
     return (global_rank // local_world_size) * local_world_size
 
@@ -866,8 +875,9 @@ def get_pipeline_model_parallel_prev_rank():
 
 def get_data_parallel_world_size(with_context_parallel=False):
     """Return world size for the data parallel group."""
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        return torch.distributed.get_world_size(
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_world_size(
             group=get_data_parallel_group(with_context_parallel=with_context_parallel)
         )
     else:
@@ -876,8 +886,9 @@ def get_data_parallel_world_size(with_context_parallel=False):
 
 def get_data_parallel_rank(with_context_parallel=False):
     """Return my rank for the data parallel group."""
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        return torch.distributed.get_rank(
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_rank(
             group=get_data_parallel_group(with_context_parallel=with_context_parallel)
         )
     else:
@@ -886,26 +897,29 @@ def get_data_parallel_rank(with_context_parallel=False):
 
 def get_context_parallel_world_size():
     """Return world size for the context parallel group."""
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        return torch.distributed.get_world_size(group=get_context_parallel_group())
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_world_size(group=get_context_parallel_group())
     else:
         return 0
 
 
 def get_context_parallel_rank():
     """Return my rank for the context parallel group."""
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        return torch.distributed.get_rank(group=get_context_parallel_group())
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_rank(group=get_context_parallel_group())
     else:
         return 0
 
 
 def get_expert_model_parallel_world_size():
     """Return world size for the expert model parallel group"""
+    dist = mcr_dl.get_distributed_engine()
     if _MPU_EXPERT_MODEL_PARALLEL_WORLD_SIZE:
         return _MPU_EXPERT_MODEL_PARALLEL_WORLD_SIZE
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        tensor_and_expert_parallel_world_size = torch.distributed.get_world_size(
+    if dist.is_available() and dist.is_initialized():
+        tensor_and_expert_parallel_world_size = dist.get_world_size(
             group=get_tensor_and_expert_parallel_group()
         )
         return tensor_and_expert_parallel_world_size // get_tensor_model_parallel_world_size()
@@ -917,8 +931,9 @@ def get_tensor_and_expert_parallel_world_size():
     """Return world size for the expert model parallel group times model parallel group.
        Currently, each expert will also be distributed across TP group by default.
     """
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        tensor_and_expert_parallel_world_size = torch.distributed.get_world_size(
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_available() and dist.is_initialized():
+        tensor_and_expert_parallel_world_size = dist.get_world_size(
             group=get_tensor_and_expert_parallel_group()
         )
         return tensor_and_expert_parallel_world_size
@@ -928,10 +943,11 @@ def get_tensor_and_expert_parallel_world_size():
 
 def get_expert_model_parallel_rank():
     """Return my rank for the expert parallel group"""
+    dist = mcr_dl.get_distributed_engine()
     if _MPU_EXPERT_MODEL_PARALLEL_RANK:
         return _MPU_EXPERT_MODEL_PARALLEL_RANK
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        tensor_and_expert_parallel_rank = torch.distributed.get_rank(
+    if dist.is_available() and dist.is_initialized():
+        tensor_and_expert_parallel_rank = dist.get_rank(
             group=get_tensor_and_expert_parallel_group()
         )
         return tensor_and_expert_parallel_rank // get_tensor_model_parallel_world_size()
@@ -941,8 +957,9 @@ def get_expert_model_parallel_rank():
 
 def get_data_modulo_expert_parallel_rank():
     """Return my rank for the context parallel group."""
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        return torch.distributed.get_rank(group=get_data_modulo_expert_parallel_group())
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_rank(group=get_data_modulo_expert_parallel_group())
     else:
         return 0
 

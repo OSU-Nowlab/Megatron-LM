@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Union
 
 import numpy
 import torch
+import mcr_dl
 
 from megatron.core.datasets.blended_megatron_dataset_config import BlendedMegatronDatasetConfig
 from megatron.core.datasets.megatron_dataset import MegatronDataset
@@ -123,8 +124,8 @@ class BlendedDataset(torch.utils.data.Dataset):
             )
         else:
             cache_hit = False
-
-        if not path_to_cache or (not cache_hit and torch.distributed.get_rank() == 0):
+        dist = mcr_dl.get_distributed_engine()
+        if not path_to_cache or (not cache_hit and dist.get_rank() == 0):
             log_single_rank(
                 logger, logging.INFO, f"Build and save the {type(self).__name__} indices",
             )

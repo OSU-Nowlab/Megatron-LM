@@ -2,6 +2,7 @@
 
 """Sample Generate GPT"""
 import torch
+import mcr_dl
 import os
 import sys
 from typing import Union
@@ -136,7 +137,9 @@ def generate_samples_conditional(model):
     avg_time = []
     tokenizer = get_tokenizer()
     model.eval()
-    if torch.distributed.get_rank() == 0:
+    dist = mcr_dl.get_distributed_engine()
+
+    if dist.get_rank() == 0:
 
         data = preprocess(args.sample_input_file, inference_only=True,
                           retrieved_neighbours=args.use_retrieved_neighbours)
@@ -149,8 +152,8 @@ def generate_samples_conditional(model):
 
     terminate_runs = 0
     while True:
-        torch.distributed.barrier()
-        if torch.distributed.get_rank() == 0:
+        dist.barrier()
+        if dist.get_rank() == 0:
             sentences = []
             n_arrays = []
             print("global batch size", args.global_batch_size)
@@ -215,7 +218,7 @@ def generate_samples_conditional(model):
             retro_generate_and_post_process(model)
 
         terminate_runs_tensor = torch.cuda.LongTensor([terminate_runs])
-        torch.distributed.broadcast(terminate_runs_tensor, 0)
+        dist.broadcast(terminate_runs_tensor, 0)
         terminate_runs = terminate_runs_tensor[0].item()
 
         if terminate_runs == 1:
@@ -224,6 +227,8 @@ def generate_samples_conditional(model):
 
 def generate_and_write_samples_conditional(model):
     args = get_args()
+    dist = mcr_dl.get_distributed_engine()
+
     if args.sample_output_file is None:
         sample_output_file = args.sample_input_file + ".out"
         print('`sample-output-file` not specified, setting '
@@ -232,7 +237,7 @@ def generate_and_write_samples_conditional(model):
         sample_output_file = args.sample_output_file
     with open(sample_output_file, 'w') as f:
         for datum in generate_samples_conditional(model):
-            if torch.distributed.get_rank() == 0:
+            if dist.get_rank() == 0:
                 f.write(datum + '\n')
 
 

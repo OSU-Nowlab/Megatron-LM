@@ -11,6 +11,7 @@ from typing import Callable, List, Optional, Tuple
 import numpy as np
 import torch
 import zarr
+import mcr_dl
 
 from ..core import CheckpointingException
 from ..dict_utils import dict_list_map_inplace
@@ -55,7 +56,8 @@ class ZarrSaveShardedStrategy(SaveShardedStrategy):
         arrays = _create_or_open_zarr_arrays(sharded_tensors, checkpoint_dir)
         for ten, arr in zip(sharded_tensors, arrays):
             _save_to_existing_array(ten, arr)
-        torch.distributed.barrier()
+        dist = mcr_dl.get_distributed_engine()
+        dist.barrier()
 
 
 def _create_or_open_zarr_arrays(
@@ -77,7 +79,8 @@ def _create_or_open_zarr_arrays(
         arr = _create_zarr_array(ten, checkpoint_dir) if _should_create_array(ten) else None
         arrays.append(arr)
 
-    torch.distributed.barrier()
+    dist = mcr_dl.get_distributed_engine()
+    dist.barrier()
     # Open arrays created above by other processes
     for arr_idx, ten in enumerate(sharded_tensors):
         if arrays[arr_idx] is not None:

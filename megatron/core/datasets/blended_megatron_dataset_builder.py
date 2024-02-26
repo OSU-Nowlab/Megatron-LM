@@ -6,6 +6,7 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
 
 import numpy
 import torch
+import mcr_dl
 
 from megatron.core.datasets.blended_dataset import BlendedDataset
 from megatron.core.datasets.blended_megatron_dataset_config import BlendedMegatronDatasetConfig
@@ -46,9 +47,9 @@ class BlendedMegatronDatasetBuilder(object):
 
     def build(self) -> List[Optional[TopLevelDataset]]:
         """Build all dataset splits according to the provided blend(s)
-        
+
         This method is distributed-aware and must be called on all ranks.
-        
+
         The dataset splits returned can vary according to the config. Supply config.blend and
         config.split to build BlendedDataset and/or MegatronDataset splits from the same
         distribution. Supply config.blend_per_split to build BlendedDataset and/or MegatronDataset
@@ -62,7 +63,7 @@ class BlendedMegatronDatasetBuilder(object):
 
     def _build_blended_dataset_splits(self,) -> List[Optional[TopLevelDataset]]:
         """Build all dataset splits according to the provided blend(s)
-        
+
         See the BlendedMegatronDatasetBuilder.build alias for more information.
 
         Returns:
@@ -265,8 +266,9 @@ class BlendedMegatronDatasetBuilder(object):
             Optional[Union[DistributedDataset, Iterable]]: The DistributedDataset instantion, the
             Iterable instantiation, or None
         """
-        if torch.distributed.is_initialized():
-            rank = torch.distributed.get_rank()
+        dist = mcr_dl.get_distributed_engine()
+        if dist.is_initialized():
+            rank = dist.get_rank()
 
             dataset = None
 
@@ -283,7 +285,7 @@ class BlendedMegatronDatasetBuilder(object):
                     )
                     raise Exception(log) from err
 
-            torch.distributed.barrier()
+            dist.barrier()
 
             # After, build on other ranks
             if rank != 0 and is_built_on_rank():
@@ -298,9 +300,9 @@ def _get_prefixes_weights_and_sizes_for_blend(
     blend: List[str], target_num_samples_per_split: List[int]
 ) -> Tuple[List[str], List[float], List[List[int]]]:
     """Determine the contribution of the MegatronDataset splits to the BlendedDataset splits
-    
+
     Args:
-        blend (List[str]): e.g. ["30", "path/to/dataset_1_prefix", "70", 
+        blend (List[str]): e.g. ["30", "path/to/dataset_1_prefix", "70",
         "path/to/dataset_2_prefix"]
 
         target_num_samples_per_split (List[int]): The number of samples to target for each

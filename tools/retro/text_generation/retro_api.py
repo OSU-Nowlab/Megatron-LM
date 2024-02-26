@@ -4,6 +4,8 @@
 """Inference API."""
 import numpy as np
 import torch
+import mcr_dl
+
 from megatron.core import mpu
 from megatron import print_rank_0, get_retro_args, get_args, get_tokenizer
 from megatron.text_generation.communication import broadcast_float_list, broadcast_tensor, broadcast_int_list
@@ -24,8 +26,10 @@ def tokenize_prompts(prompts=None, tokens_to_generate=None,
     prompts_tokens_cuda_long_tensor = None
     prompts_length_cuda_long_tensor = None
 
+    dist = mcr_dl.get_distributed_engine()
+
     # On the specified rank, build the above.
-    if torch.distributed.get_rank() == rank:
+    if dist.get_rank() == rank:
         assert prompts is not None
         assert tokens_to_generate is not None
         # Tensor of tokens padded and their unpadded length.
@@ -184,9 +188,10 @@ def retro_generate(model,
     if random_seed != -1:
         torch.random.manual_seed(random_seed)
 
+    dist = mcr_dl.get_distributed_engine()
     # Tokenize prompts and get the batch.
     # Note that these tensors are broadcaseted to all ranks.
-    if torch.distributed.get_rank() == 0:
+    if dist.get_rank() == 0:
         assert prompts is not None
 
     context_tokens_tensor, context_length_tensor = tokenize_prompts(
@@ -199,7 +204,7 @@ def retro_generate(model,
     args = get_args()
     r = retro_args.retro_gpt_retrieved_length
     l = int(np.ceil(min(args.max_position_embeddings, context_tokens_tensor.size(1)) / retro_args.retro_gpt_chunk_length))
-    if torch.distributed.get_rank() == 0:
+    if dist.get_rank() == 0:
         neighbours_array = neighbours_array.reshape(1, args.retro_num_neighbors, r).repeat(l, axis=0)  ## dim (l, k, r)
 
     if tokens_to_generate == 0:

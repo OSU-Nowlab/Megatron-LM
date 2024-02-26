@@ -6,6 +6,7 @@ import os
 import math
 import numpy as np
 import torch
+import mcr_dl
 import torch.nn.functional as F
 from typing import Optional
 
@@ -162,7 +163,7 @@ def sinkhorn(cost, tol=0.0001):
     cost = torch.exp(cost)
     d0 = torch.ones(cost.size(0), device=cost.device, dtype=cost.dtype)
     d1 = torch.ones(cost.size(1), device=cost.device, dtype=cost.dtype)
-    
+
     eps = 0.00000001
     error = 1e9
     d1_old = d1
@@ -207,7 +208,8 @@ class SwitchMLP(MegatronModule):
     def gather_indices(self, local_indices):
         """ Gather tensors and concatinate along the first dimension."""
         group = get_tensor_and_expert_parallel_group()
-        world_size = torch.distributed.get_world_size(group=group)
+        dist = mcr_dl.get_distributed_engine()
+        world_size = dist.get_world_size(group=group)
         # Bypass the function if we are using only 1 GPU.
         if world_size == 1:
             return local_indices
@@ -218,7 +220,7 @@ class SwitchMLP(MegatronModule):
         # TODO pre allocate memory
         output = torch.empty(dim_size, dtype=local_indices.dtype,
                              device=torch.cuda.current_device())
-        torch.distributed._all_gather_base(
+        dist._all_gather_base(
             output, local_indices.contiguous(), group=group
         )
         return output
@@ -230,7 +232,7 @@ class SwitchMLP(MegatronModule):
         b = hidden_states.size(1)
         h = hidden_states.size(2)
         route = self.router(hidden_states).view(-1, args.num_experts)
-        
+
         # TODO (rprenger) Right now we're just using the sinkhorn algorithm
         # for load balancing. There should be an option to do no load balancing
         # and the algorithm and parametets should be further tested

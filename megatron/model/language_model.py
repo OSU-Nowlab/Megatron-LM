@@ -200,7 +200,8 @@ class Embedding(MegatronModule):
         """
         if self.tokentype_embeddings is not None:
             raise Exception('tokentype embeddings is already initialized')
-        if torch.distributed.get_rank() == 0:
+        dist = mcr_dl.get_distributed_engine()
+        if dist.get_rank() == 0:
             print('adding embedding for {} tokentypes'.format(num_tokentypes),
                   flush=True)
         self.num_tokentypes = num_tokentypes

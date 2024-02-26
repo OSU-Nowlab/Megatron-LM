@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import torch
+import mcr_dl
 
 from megatron.core import parallel_state
 from megatron.core.dist_checkpointing import ShardedTensor, save, load
@@ -27,7 +28,8 @@ class TestSerialization:
 
         with TempNamedDir(tmp_path_dist_ckpt / 'test_single_process_save_load') as ckpt_dir:
             save(sharded_state_dict, ckpt_dir)
-            torch.distributed.barrier()
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier()
 
             assert (ckpt_dir / 'keyA').is_dir()
             assert (ckpt_dir / 'keyB').is_dir()
@@ -38,7 +40,7 @@ class TestSerialization:
                 'load_sd_keyA': ShardedTensor.from_rank_offsets('keyA', torch.ones(2, 4), replica_id=Utils.rank),
             }
             loaded_state_dict = load(load_ssd, ckpt_dir)
-            
+
             assert set(loaded_state_dict.keys()) == {'load_sd_keyA'}
             assert isinstance(loaded_state_dict['load_sd_keyA'], torch.Tensor)
             assert loaded_state_dict['load_sd_keyA'].shape == (2, 4)
@@ -162,7 +164,8 @@ class TestSerialization:
 
         with TempNamedDir(tmp_path_dist_ckpt / 'test_load_tensors_metadata') as ckpt_dir:
             save(state_dict, ckpt_dir)
-            torch.distributed.barrier()
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier()
             assert (ckpt_dir / 'keyA').is_dir()
 
             del state_dict
@@ -237,15 +240,16 @@ class TestSerialization:
             load(state_dict, non_ex_path)
         assert f'directory {non_ex_path} does not exist' in str(exc_info.value)
 
+        dist = mcr_dl.get_distributed_engine()
         with TempNamedDir(tmp_path_dist_ckpt / ckpt_dir_name) as ckpt_dir:
-            torch.distributed.barrier()
+            dist.barrier()
             # Empty directory - not a distributed checkpoint
             with pytest.raises(CheckpointingException) as exc_info:
                 load(state_dict, ckpt_dir)
             assert f'is not a distributed checkpoint' in str(exc_info.value)
 
             # Missing Zarr arrays
-            torch.distributed.barrier()
+            dist.barrier()
             save(state_dict, ckpt_dir)
             sh_ten.key = 'different_key'
             with pytest.raises(CheckpointingException) as exc_info:
