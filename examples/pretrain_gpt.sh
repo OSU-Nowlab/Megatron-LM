@@ -4,10 +4,10 @@
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
-CHECKPOINT_PATH=<Specify path>
-VOCAB_FILE=<Specify path to file>/gpt2-vocab.json
-MERGE_FILE=<Specify path to file>/gpt2-merges.txt
-DATA_PATH=<Specify path and file prefix>_text_document
+CHECKPOINT_PATH=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/release/mp_rank_00/model_optim_rng.pt
+VOCAB_FILE=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/gpt2-vocab.json
+MERGE_FILE=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/gpt2-merges.txt
+DATA_PATH=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/my-gpt2_text_document
 
 GPT_ARGS="
     --num-layers 24 \

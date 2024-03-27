@@ -25,7 +25,7 @@ def load(args):
         cc_flag.append('arch=compute_80,code=sm_80')
         if int(bare_metal_minor) >= 7:
             cc_flag.append('-gencode')
-            cc_flag.append('arch=compute_90,code=sm_90')
+            cc_flag.append('arch=compute_80,code=sm_80')
 
     # Build path
     srcpath = pathlib.Path(__file__).parent.absolute()
