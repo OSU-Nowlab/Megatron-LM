@@ -7,6 +7,7 @@ from abc import abstractmethod
 from apex.multi_tensor_apply import multi_tensor_applier
 import amp_C
 import torch
+import mcr_dl
 from torch.nn.parallel.distributed import DistributedDataParallel as torchDDP
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
@@ -225,7 +226,8 @@ class MegatronOptimizer(ABC):
                     grad = word_embeddings_weight.main_grad
                 else:
                     grad = word_embeddings_weight.grad
-                torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
+                dist = mcr_dl.get_distributed_engine()
+                dist.all_reduce(grad, group=mpu.get_embedding_group())
 
 
     def allreduce_position_embedding_grads(self, args):
@@ -244,7 +246,8 @@ class MegatronOptimizer(ABC):
             assert args.DDP_impl == 'local', \
                 'T5 model is only supported with local DDP mode'
             grad = unwrapped_model.language_model.embedding.position_embeddings.weight.main_grad
-            torch.distributed.all_reduce(grad, group=mpu.get_position_embedding_group())
+            dist = mcr_dl.get_distributed_engine()
+            dist.all_reduce(grad, group=mpu.get_position_embedding_group())
 
 
     def allreduce_embedding_grads(self, args):
@@ -262,14 +265,15 @@ class MegatronOptimizer(ABC):
                 args.sequence_parallel:
             grads = []
             for model_module in self.models:
-                unwrapped_model = unwrap_model( 
+                unwrapped_model = unwrap_model(
                     model_module, (torchDDP, LocalDDP, Float16Module))
                 for param in unwrapped_model.parameters():
                     if getattr(param, 'sequence_parallel', False):
                         grad = param.main_grad if args.DDP_impl == 'local' else param.grad
                         grads.append(grad.data)
             coalesced = _flatten_dense_tensors(grads)
-            torch.distributed.all_reduce(
+            dist = mcr_dl.get_distributed_engine()
+            dist.all_reduce(
                 coalesced, group=mpu.get_tensor_model_parallel_group())
             for buf, synced in zip(grads, _unflatten_dense_tensors(
                     coalesced, grads)):
@@ -393,8 +397,9 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
             main_grads, self.found_inf, self.grad_scaler.inv_scale)
 
         # Update across all model parallel instances.
-        torch.distributed.all_reduce(self.found_inf,
-                                     op=torch.distributed.ReduceOp.MAX,
+        dist = mcr_dl.get_distributed_engine()
+        dist.all_reduce(self.found_inf,
+                                     op=dist.ReduceOp.MAX,
                                      group=self.get_model_parallel_group())
 
         # Check for nan.
@@ -587,7 +592,7 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
             for main_param in main_group:
                 if main_param.grad is not None:
                     main_grads.append(main_param.grad.data)
-        
+
         return main_grads
 
 

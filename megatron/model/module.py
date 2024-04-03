@@ -3,6 +3,7 @@
 """Megatron Module"""
 
 import torch
+import mcr_dl
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 
@@ -70,6 +71,7 @@ class MegatronModule(torch.nn.Module):
         # 3. In the training loop, before an all-reduce between the grads of
         #    the two word_embeddings layers to ensure that every applied weight
         #    update is the same on both stages.
+        dist = mcr_dl.get_distributed_engine()
         if mpu.is_pipeline_last_stage() and not self.pre_process:
             assert not mpu.is_pipeline_first_stage()
             self._word_embeddings_for_head_key = 'word_embeddings_for_head'
@@ -90,7 +92,7 @@ class MegatronModule(torch.nn.Module):
                 self.pre_process:
             self.language_model.embedding.zero_parameters()
 
-        if not torch.distributed.is_initialized():
+        if not dist.is_initialized():
             if not getattr(MegatronModule, "embedding_warning_printed", False):
                 print("WARNING! Distributed processes aren't initialized, so "
                       "word embeddings in the last layer are not initialized. "
@@ -103,7 +105,7 @@ class MegatronModule(torch.nn.Module):
         # Ensure that first and last stages have the same initial parameter
         # values.
         if mpu.is_rank_in_embedding_group():
-            torch.distributed.all_reduce(self.word_embeddings_weight().data,
+            dist.all_reduce(self.word_embeddings_weight().data,
                                          group=mpu.get_embedding_group())
 
         # Ensure that encoder(first stage) and decoder(split stage) position
@@ -114,7 +116,7 @@ class MegatronModule(torch.nn.Module):
             # TODO: Support tokentype embedding.
             self.language_model.embedding.cuda()
             position_embeddings = self.language_model.embedding.position_embeddings
-            torch.distributed.all_reduce(position_embeddings.weight.data,
+            dist.all_reduce(position_embeddings.weight.data,
                                          group=mpu.get_position_embedding_group())
 
 

@@ -5,6 +5,7 @@ import operator
 from typing import Optional, List, Union, Callable, Tuple
 
 import torch
+import mcr_dl
 
 from megatron import core
 from megatron.core.parallel_state import (
@@ -58,9 +59,9 @@ def _communicate_shapes(tensor_send_next, tensor_send_prev,
         send_next_shape_tensor = torch.tensor(tensor_send_next.size(),
                                               device=torch.cuda.current_device(),
                                               dtype=torch.int64)
-
+    dist = mcr_dl.get_distributed_engine()
     if use_ring_exchange_p2p:
-        torch.distributed.ring_exchange(tensor_send_prev=send_prev_shape_tensor,
+        dist.ring_exchange(tensor_send_prev=send_prev_shape_tensor,
                                         tensor_recv_prev=recv_prev_shape_tensor,
                                         tensor_send_next=send_next_shape_tensor,
                                         tensor_recv_next=recv_next_shape_tensor,
@@ -68,27 +69,27 @@ def _communicate_shapes(tensor_send_next, tensor_send_prev,
     else:
         ops = []
         if send_prev_shape_tensor is not None:
-            send_prev_op = torch.distributed.P2POp(
-                torch.distributed.isend, send_prev_shape_tensor,
+            send_prev_op = dist.P2POp(
+                dist.isend, send_prev_shape_tensor,
                 get_pipeline_model_parallel_prev_rank())
             ops.append(send_prev_op)
         if recv_prev_shape_tensor is not None:
-            recv_prev_op = torch.distributed.P2POp(
-                torch.distributed.irecv, recv_prev_shape_tensor,
+            recv_prev_op = dist.P2POp(
+                dist.irecv, recv_prev_shape_tensor,
                 get_pipeline_model_parallel_prev_rank())
             ops.append(recv_prev_op)
         if send_next_shape_tensor is not None:
-            send_next_op = torch.distributed.P2POp(
-                torch.distributed.isend, send_next_shape_tensor,
+            send_next_op = dist.P2POp(
+                dist.isend, send_next_shape_tensor,
                 get_pipeline_model_parallel_next_rank())
             ops.append(send_next_op)
         if recv_next_shape_tensor is not None:
-            recv_next_op = torch.distributed.P2POp(
-                torch.distributed.irecv, recv_next_shape_tensor,
+            recv_next_op = dist.P2POp(
+                dist.irecv, recv_next_shape_tensor,
                 get_pipeline_model_parallel_next_rank())
             ops.append(recv_next_op)
         if len(ops) > 0:
-            reqs = torch.distributed.batch_isend_irecv(ops)
+            reqs = dist.batch_isend_irecv(ops)
             for req in reqs:
                 req.wait()
 
@@ -113,32 +114,33 @@ def _batched_p2p_ops(*,
                      tensor_recv_next: Optional[torch.Tensor],
                      group: torch.distributed.ProcessGroup):
     ops = []
+    dist = mcr_dl.get_distributed_engine()
     if tensor_send_prev is not None:
-        send_prev_op = torch.distributed.P2POp(
-            torch.distributed.isend, tensor_send_prev,
+        send_prev_op = dist.P2POp(
+            dist.isend, tensor_send_prev,
             get_pipeline_model_parallel_prev_rank(),
             group)
         ops.append(send_prev_op)
     if tensor_recv_prev is not None:
-        recv_prev_op = torch.distributed.P2POp(
-            torch.distributed.irecv, tensor_recv_prev,
+        recv_prev_op = dist.P2POp(
+            dist.irecv, tensor_recv_prev,
             get_pipeline_model_parallel_prev_rank(),
             group)
         ops.append(recv_prev_op)
     if tensor_send_next is not None:
-        send_next_op = torch.distributed.P2POp(
-            torch.distributed.isend, tensor_send_next,
+        send_next_op = dist.P2POp(
+            dist.isend, tensor_send_next,
             get_pipeline_model_parallel_next_rank(),
             group)
         ops.append(send_next_op)
     if tensor_recv_next is not None:
-        recv_next_op = torch.distributed.P2POp(
-            torch.distributed.irecv, tensor_recv_next,
+        recv_next_op = dist.P2POp(
+            dist.irecv, tensor_recv_next,
             get_pipeline_model_parallel_next_rank(),
             group)
         ops.append(recv_next_op)
     if len(ops) > 0:
-        reqs = torch.distributed.batch_isend_irecv(ops)
+        reqs = dist.batch_isend_irecv(ops)
     else:
         reqs = []
     return reqs
@@ -151,9 +153,10 @@ def _p2p_ops(*,
              group: torch.distributed.ProcessGroup):
     reqs = []
     rank = get_pipeline_model_parallel_rank()
+    dist = mcr_dl.get_distributed_engine()
     if get_pipeline_model_parallel_rank() % 2 == 0:
         if tensor_send_next is not None:
-            send_next_req = torch.distributed.isend(
+            send_next_req = dist.isend(
                 tensor=tensor_send_next,
                 dst=get_pipeline_model_parallel_next_rank(),
                 group=group,
@@ -161,7 +164,7 @@ def _p2p_ops(*,
             reqs.append(send_next_req)
 
         if tensor_recv_prev is not None:
-            recv_prev_req = torch.distributed.irecv(
+            recv_prev_req = dist.irecv(
                 tensor=tensor_recv_prev,
                 src=get_pipeline_model_parallel_prev_rank(),
                 group=group,
@@ -169,7 +172,7 @@ def _p2p_ops(*,
             reqs.append(recv_prev_req)
 
         if tensor_send_prev is not None:
-            send_prev_req = torch.distributed.isend(
+            send_prev_req = dist.isend(
                 tensor=tensor_send_prev,
                 dst=get_pipeline_model_parallel_prev_rank(),
                 group=group,
@@ -177,7 +180,7 @@ def _p2p_ops(*,
             reqs.append(send_prev_req)
 
         if tensor_recv_next is not None:
-            recv_next_req = torch.distributed.irecv(
+            recv_next_req = dist.irecv(
                 tensor=tensor_recv_next,
                 src=get_pipeline_model_parallel_next_rank(),
                 group=group,
@@ -186,7 +189,7 @@ def _p2p_ops(*,
 
     else:
         if tensor_recv_prev is not None:
-            recv_prev_req = torch.distributed.irecv(
+            recv_prev_req = dist.irecv(
                 tensor=tensor_recv_prev,
                 src=get_pipeline_model_parallel_prev_rank(),
                 group=group,
@@ -194,7 +197,7 @@ def _p2p_ops(*,
             reqs.append(recv_prev_req)
 
         if tensor_send_next is not None:
-            send_next_req = torch.distributed.isend(
+            send_next_req = dist.isend(
                 tensor=tensor_send_next,
                 dst=get_pipeline_model_parallel_next_rank(),
                 group=group,
@@ -202,7 +205,7 @@ def _p2p_ops(*,
             reqs.append(send_next_req)
 
         if tensor_recv_next is not None:
-            recv_next_req = torch.distributed.irecv(
+            recv_next_req = dist.irecv(
                 tensor=tensor_recv_next,
                 src=get_pipeline_model_parallel_next_rank(),
                 group=group,
@@ -210,7 +213,7 @@ def _p2p_ops(*,
             reqs.append(recv_next_req)
 
         if tensor_send_prev is not None:
-            send_prev_req = torch.distributed.isend(
+            send_prev_req = dist.isend(
                 tensor=tensor_send_prev,
                 dst=get_pipeline_model_parallel_prev_rank(),
                 group=group,
@@ -272,8 +275,8 @@ def _communicate(*, tensor_send_next: Optional[torch.Tensor],
 
         use_ring_exchange_p2p (bool, optional, default = False):
             Use custom ring_exchange kernel instead of
-            torch.distributed.batch_isend_irecv(). Requires custom
-            built torch with torch.distributed.ring_exchange.
+            dist.batch_isend_irecv(). Requires custom
+            built torch with dist.ring_exchange.
 
 
     Returns:
@@ -331,7 +334,8 @@ def _communicate(*, tensor_send_next: Optional[torch.Tensor],
     # Send tensors in both the forward and backward directions as appropriate.
     if use_ring_exchange_p2p:
         def _ring_exchange_wrapper(**kwargs):
-            torch.distributed.ring_exchange(**kwargs)
+            dist = mcr_dl.get_distributed_engine()
+            dist.ring_exchange(**kwargs)
             return []
         p2p_func = _ring_exchange_wrapper
     elif batch_p2p_comm:

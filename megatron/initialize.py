@@ -8,6 +8,7 @@ import time
 
 import numpy as np
 import torch
+import mcr_dl
 from datetime import timedelta
 
 from megatron import fused_kernels
@@ -26,10 +27,10 @@ def initialize_megatron(extra_args_provider=None, args_defaults={},
                         ignore_unknown_args=False, allow_no_cuda=False):
     """Set global variables, initialize distributed, and
     set autoresume and random seeds.
-    `allow_no_cuda` should not be set unless using megatron for cpu only 
-    data processing. In general this arg should not be set unless you know 
+    `allow_no_cuda` should not be set unless using megatron for cpu only
+    data processing. In general this arg should not be set unless you know
     what you are doing.
-    Returns a function to finalize distributed env initialization 
+    Returns a function to finalize distributed env initialization
     (optionally, only when args.lazy_mpu_init == True)
     """
     if not allow_no_cuda:
@@ -44,7 +45,7 @@ def initialize_megatron(extra_args_provider=None, args_defaults={},
         load_args_from_checkpoint(args)
 
     validate_args(args, args_defaults)
-        
+
     # set global args, build tokenizer, and set adlr-autoresume,
     # tensorboard-writer, and timers.
     set_global_variables(args)
@@ -54,7 +55,7 @@ def initialize_megatron(extra_args_provider=None, args_defaults={},
         args = get_args()
         # Pytorch distributed.
         _initialize_distributed()
-        
+
         # Random seeds for reproducibility.
         if args.rank == 0:
             print('> setting random seeds to {} ...'.format(args.seed))
@@ -93,7 +94,8 @@ def _compile_dependencies():
     # Compile dataset C++ code.
     # =========================
     # TODO: move this to ninja
-    if torch.distributed.get_rank() == 0:
+    dist = mcr_dl.get_distributed_engine()
+    if dist.get_rank() == 0:
         start_time = time.time()
         print('> compiling dataset index builder ...')
         from megatron.data.dataset_utils import compile_helper
@@ -122,22 +124,22 @@ def _compile_dependencies():
             print('WARNING: constraints for invoking optimized'
                   ' fused softmax kernel are not met. We default'
                   ' back to unfused kernel invocations.', flush=True)
-    
+
     # Always build on rank zero first.
-    if torch.distributed.get_rank() == 0:
+    if dist.get_rank() == 0:
         start_time = time.time()
         print('> compiling and loading fused kernels ...', flush=True)
         fused_kernels.load(args)
-        torch.distributed.barrier()
+        dist.barrier()
     else:
-        torch.distributed.barrier()
+        dist.barrier()
         fused_kernels.load(args)
     # Simple barrier to make sure all ranks have passed the
     # compilation phase successfully before moving on to the
     # rest of the program. We think this might ensure that
     # the lock is released.
-    torch.distributed.barrier()
-    if torch.distributed.get_rank() == 0:
+    dist.barrier()
+    if dist.get_rank() == 0:
         print('>>> done with compiling and loading fused kernels. '
               'Compilation time: {:.3f} seconds'.format(
                   time.time() - start_time), flush=True)
@@ -147,15 +149,16 @@ def _compile_dependencies():
 def _initialize_distributed():
     """Initialize torch.distributed and core model parallel."""
     args = get_args()
+    dist = mcr_dl.get_distributed_engine()
 
     device_count = torch.cuda.device_count()
-    if torch.distributed.is_initialized():
+    if dist is not None and dist.is_initialized():
 
         if args.rank == 0:
             print('torch distributed is already initialized, '
                   'skipping initialization ...', flush=True)
-        args.rank = torch.distributed.get_rank()
-        args.world_size = torch.distributed.get_world_size()
+        args.rank = dist.get_rank()
+        args.world_size = dist.get_world_size()
 
     else:
 
@@ -171,8 +174,13 @@ def _initialize_distributed():
                 args.local_rank = device
             torch.cuda.set_device(device)
     # Call the init process
-    torch.distributed.init_process_group(
-        backend=args.distributed_backend,
+    # dist.init_process_group(
+    #     backend=args.distributed_backend,
+    #     world_size=args.world_size, rank=args.rank,
+    #     timeout=timedelta(minutes=args.distributed_timeout_minutes))
+    mcr_dl.init_processes(
+        dist_engine=args.distributed_engine,
+        dist_backend=args.distributed_backend,
         world_size=args.world_size, rank=args.rank,
         timeout=timedelta(minutes=args.distributed_timeout_minutes))
 
@@ -196,10 +204,11 @@ def _initialize_distributed():
 def _init_autoresume():
     """Set autoresume start time."""
     autoresume = get_adlr_autoresume()
+    dist = mcr_dl.get_distributed_engine()
     if autoresume:
-        torch.distributed.barrier()
+        dist.barrier()
         autoresume.init()
-        torch.distributed.barrier()
+        dist.barrier()
 
 
 def _set_random_seed(seed_, data_parallel_random_init=False):

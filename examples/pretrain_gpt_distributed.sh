@@ -20,6 +20,9 @@ NNODES=4
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 JOBID=133
 
+export MASTER_ADDR=$MASTER_ADDR
+export WORLD_SIZE=$WORLD_SIZE
+
 CHECKPOINT_PATH=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/release/mp_rank_00/model_optim_rng.pt
 VOCAB_FILE=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/gpt2-vocab.json
 MERGE_FILE=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/gpt2-merges.txt
@@ -76,9 +79,15 @@ OUTPUT_ARGS="
     --eval-iters 10
 "
 
+MCRDL_ARGS="
+    --distributed-engine mcr_dl \
+    --distributed-backend nccl \
+"
+
 torchrun $DISTRIBUTED_ARGS pretrain_gpt.py \
     $GPT_ARGS \
     $DATA_ARGS \
+    $MCRDL_ARGS \
     $OUTPUT_ARGS \
     --distributed-backend nccl \
     --save $CHECKPOINT_PATH \

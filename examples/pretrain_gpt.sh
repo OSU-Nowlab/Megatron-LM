@@ -42,10 +42,30 @@ OUTPUT_ARGS="
     --eval-interval 1000 \
     --eval-iters 10
 "
+MCRDL_ARGS="
+    --distributed-engine torch \
+    --distributed-backend nccl \
+"
 
 torchrun pretrain_gpt.py \
     $GPT_ARGS \
     $DATA_ARGS \
+    $MCRDL_ARGS \
     $OUTPUT_ARGS \
     --save $CHECKPOINT_PATH \
     --load $CHECKPOINT_PATH
+
+
+# mpirun_rsh --export-all -np 1 a100-01 \
+#             MV2_USE_CUDA=1 \
+#             MV2_HYBRID_BINDING_POLICY=spread \
+#             MV2_CPU_BINDING_POLICY=hybrid \
+#             MV2_USE_GDRCOPY=0 PYTHONNOUSERSITE=true \
+#             LD_PRELOAD=/home/gulhane.2/mvapich2-installation/nvidia/gdr2.3.7_cuda11.7_gcc10.3.0_latest/lib/libmpi.so \
+#             pretrain_gpt.py \
+#             $GPT_ARGS \
+#             $DATA_ARGS \
+#             $MCRDL_ARGS \
+#             $OUTPUT_ARGS \
+#             --save $CHECKPOINT_PATH \
+#             --load $CHECKPOINT_PATH

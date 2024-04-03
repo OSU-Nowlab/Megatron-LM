@@ -1,6 +1,7 @@
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
 import torch
+import mcr_dl
 from typing import List, Sequence
 
 from megatron.core.utils import divide
@@ -80,7 +81,8 @@ def gather_split_1d_tensor(tensor):
     # as opposed to torch.distributed.all_gather for efficiency reasons.
     # This API calls directly NCCL all-gather versus the former does
     # internal copies and can potentially cause slow down.
-    torch.distributed._all_gather_base(gathered, tensor,
+    dist = mcr_dl.get_distributed_engine()
+    dist._all_gather_base(gathered, tensor,
                                        group=parallel_state.get_tensor_model_parallel_group())
     return gathered
 

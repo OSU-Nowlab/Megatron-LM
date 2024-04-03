@@ -7,6 +7,7 @@ from abc import abstractmethod
 import time
 
 import torch
+import mcr_dl
 
 
 
@@ -80,7 +81,8 @@ class Timer(TimerBase):
         """Start the timer."""
         assert not self._started, 'timer has already been started'
         if barrier:
-            torch.distributed.barrier(group=self._barrier_group)
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier(group=self._barrier_group)
         torch.cuda.synchronize()
         self._start_time = time.time()
         self._started = True
@@ -90,7 +92,8 @@ class Timer(TimerBase):
         """Stop the timer."""
         assert self._started, 'timer is not started'
         if barrier:
-            torch.distributed.barrier(group=self._barrier_group)
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier(group=self._barrier_group)
         torch.cuda.synchronize()
         self._elapsed += (time.time() - self._start_time)
         self._started = False
@@ -171,13 +174,14 @@ class Timers:
             - reset: reset the timer after recording the elapsed time
             - barrier: if set, do a global barrier before time measurments
         """
+        dist = mcr_dl.get_distributed_engine()
 
         # First make sure all the callers are in sync.
         if barrier:
-            torch.distributed.barrier()
+            dist.barrier()
 
-        world_size = torch.distributed.get_world_size()
-        rank = torch.distributed.get_rank()
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
 
         # Here we can use gather on the rank we want to print the
         # timing, however, there is no gather_base support in
@@ -196,9 +200,15 @@ class Timers:
                 rank_name_to_time[rank, i] = self._timers[name].elapsed(
                     reset=reset)
 
-        # See the note above for why we are not using gather.
-        torch.distributed._all_gather_base(rank_name_to_time.view(-1),
-                                           rank_name_to_time[rank, :].view(-1))
+        # RG_TBD: implement _all_gather_base in mcr_dl (nccl, mpi backend)
+        try:
+            # See the note above for why we are not using gather.
+            dist._all_gather_base(rank_name_to_time.view(-1),
+                                            rank_name_to_time[rank, :].view(-1))
+        except:
+            all_gather_func = dist.allgather_fn
+            all_gather_func(rank_name_to_time.view(-1),
+                                            rank_name_to_time[rank, :].view(-1))
 
         return rank_name_to_time
 
@@ -243,12 +253,13 @@ class Timers:
         """Report times across all ranks."""
         rank_name_to_time = self._get_elapsed_time_all_ranks(names, reset,
                                                              barrier)
+        dist = mcr_dl.get_distributed_engine()
 
         output_string = 'times across ranks (ms):'
         no_reported_timing = True
         for i, name in enumerate(names):
             not_yet_found = True
-            for rank in range(torch.distributed.get_world_size()):
+            for rank in range(dist.get_world_size()):
                 if rank_name_to_time[rank, i] > 0:
                     no_reported_timing = False
                     if not_yet_found:
@@ -281,9 +292,10 @@ class Timers:
                 self._log_option))
 
         # If no input rank is provided, log on last rank.
+        dist = mcr_dl.get_distributed_engine()
         if rank is None:
-            rank = torch.distributed.get_world_size() - 1
-        if rank == torch.distributed.get_rank() and output_string is not None:
+            rank = dist.get_world_size() - 1
+        if rank == dist.get_rank() and output_string is not None:
             print(output_string, flush=True)
 
 

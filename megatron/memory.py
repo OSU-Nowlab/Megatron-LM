@@ -2,6 +2,7 @@
 
 
 import torch
+import mcr_dl
 
 
 # A dictionary of all the memory buffers allocated.
@@ -34,7 +35,8 @@ class MemoryBuffer:
 
     """
     def __init__(self, name, numel, dtype, track_usage):
-        if torch.distributed.get_rank() == 0:
+        dist = mcr_dl.get_distributed_engine()
+        if dist.get_rank() == 0:
             element_size = torch.tensor([], dtype=dtype).element_size()
             print('> building the {} memory buffer with {} num elements '
                   'and {} dtype ({:.1f} MB)...'.format(
@@ -106,7 +108,8 @@ class MemoryBuffer:
         """Print memory usage average over time. We would like this value
         to be as high as possible."""
         assert self.track_usage, 'You need to enable track usage.'
-        if torch.distributed.get_rank() == 0:
+        dist = mcr_dl.get_distributed_engine()
+        if dist.get_rank() == 0:
             print(' > usage of {} memory buffer: {:.2f} %'.format(
                 self.name, self.in_use_value * 100.0 / self.total_value),
                   flush=True)

@@ -1,5 +1,6 @@
 import os
 import torch
+import mcr_dl
 
 from megatron import get_args, print_rank_0
 from megatron.checkpointing import get_checkpoint_tracker_filename, get_checkpoint_name
@@ -126,8 +127,9 @@ class ICTBertModel(MegatronModule):
 
         checkpoint_name = get_checkpoint_name(args.bert_load, iteration, False)
         if mpu.get_data_parallel_rank() == 0:
+            dist = mcr_dl.get_distributed_engine()
             print('global rank {} is loading checkpoint {}'.format(
-                torch.distributed.get_rank(), checkpoint_name))
+                dist.get_rank(), checkpoint_name))
 
         try:
             state_dict = torch.load(checkpoint_name, map_location='cpu')

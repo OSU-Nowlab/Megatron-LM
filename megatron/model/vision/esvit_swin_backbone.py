@@ -10,10 +10,10 @@
 import os
 import logging
 import torch
+import mcr_dl
 import torch.nn as nn
 import torch.nn.functional as F
 from functools import partial
-import torch.distributed as dist
 from torch.nn.init import trunc_normal_
 from megatron.model.transformer import DropPath
 from megatron import get_args
@@ -630,7 +630,7 @@ class SwinTransformer(nn.Module):
     def forward_selfattention(self, x, n=1):
         # n=1 return the last layer attn map; otherwise return attn maps in all layers
 
-        
+
         x = self.patch_embed(x)
         if self.ape:
             x = x + self.absolute_pos_embed
@@ -692,8 +692,8 @@ class SwinTransformer(nn.Module):
                     if i == len(self.layers)-1: # use the norm in the last stage
                         x_ = self.norm(x_)
 
-                    x_avg = torch.flatten(self.avgpool(x_.transpose(1, 2)), 1)  # B C     
-                    # print(f'Stage {i},  x_avg {x_avg.shape}')          
+                    x_avg = torch.flatten(self.avgpool(x_.transpose(1, 2)), 1)  # B C
+                    # print(f'Stage {i},  x_avg {x_avg.shape}')
                     output.append(x_avg)
 
                 start_blk = 0
@@ -707,6 +707,7 @@ class SwinTransformer(nn.Module):
         flops += self.patch_embed.flops()
         for i, layer in enumerate(self.layers):
             flops += layer.flops()
+            dist = mcr_dl.get_distributed_engine()
             if dist.get_rank() == 0:
                 print(f"GFLOPs layer_{i}: {layer.flops() / 1e9}")
         flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
