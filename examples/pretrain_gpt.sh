@@ -4,10 +4,10 @@
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
-CHECKPOINT_PATH=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/release/mp_rank_00/model_optim_rng.pt
-VOCAB_FILE=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/gpt2-vocab.json
-MERGE_FILE=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/gpt2-merges.txt
-DATA_PATH=/home/gulhane.2/Megatron-LM-MCR-DL/gpt_dataset_aws/my-gpt2_text_document
+CHECKPOINT_PATH=<Specify path>
+VOCAB_FILE=<Specify path to file>/gpt2-vocab.json
+MERGE_FILE=<Specify path to file>/gpt2-merges.txt
+DATA_PATH=<Specify path and file prefix>_text_document
 
 GPT_ARGS="
     --num-layers 24 \
@@ -54,18 +54,3 @@ torchrun pretrain_gpt.py \
     $OUTPUT_ARGS \
     --save $CHECKPOINT_PATH \
     --load $CHECKPOINT_PATH
-
-
-# mpirun_rsh --export-all -np 1 a100-01 \
-#             MV2_USE_CUDA=1 \
-#             MV2_HYBRID_BINDING_POLICY=spread \
-#             MV2_CPU_BINDING_POLICY=hybrid \
-#             MV2_USE_GDRCOPY=0 PYTHONNOUSERSITE=true \
-#             LD_PRELOAD=/home/gulhane.2/mvapich2-installation/nvidia/gdr2.3.7_cuda11.7_gcc10.3.0_latest/lib/libmpi.so \
-#             pretrain_gpt.py \
-#             $GPT_ARGS \
-#             $DATA_ARGS \
-#             $MCRDL_ARGS \
-#             $OUTPUT_ARGS \
-#             --save $CHECKPOINT_PATH \
-#             --load $CHECKPOINT_PATH

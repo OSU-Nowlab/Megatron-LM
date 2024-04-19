@@ -168,11 +168,12 @@ def initialize_model_parallel(
             all_data_parallel_group_ranks.append(list(ranks))
             group = dist.new_group(ranks)
             args = get_args()
-            if not torch.distributed.is_initialized():
-                torch.distributed.init_process_group(
-                    backend=args.distributed_backend,
+            if not dist.is_initialized():
+                dist.init_processes(
+                    dist_backend=args.distributed_backend,
                     world_size=args.world_size, rank=args.rank)
-            group_gloo = torch.distributed.new_group(ranks, backend="gloo")
+
+            group_gloo = dist.new_group(ranks)
             if rank in ranks:
                 _DATA_PARALLEL_GROUP = group
                 _DATA_PARALLEL_GROUP_GLOO = group_gloo

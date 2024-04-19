@@ -206,7 +206,15 @@ class Timers:
             dist._all_gather_base(rank_name_to_time.view(-1),
                                             rank_name_to_time[rank, :].view(-1))
         except:
-            all_gather_func = dist.allgather_fn
+            # Changes to support all_gather with MCR_DL
+            from megatron import get_args
+            args = get_args()
+            if args.distributed_engine == "torch":
+                from mcr_dl import TorchBackend
+                all_gather_func = TorchBackend.get_all_gather_function()
+            elif args.distributed_engine == "mcr_dl":
+                all_gather_func = dist.allgather_fn
+
             all_gather_func(rank_name_to_time.view(-1),
                                             rank_name_to_time[rank, :].view(-1))
 

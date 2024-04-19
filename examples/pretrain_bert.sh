@@ -2,9 +2,9 @@
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
-CHECKPOINT_PATH=/home/gulhane.2/Megatron-LM-MCR-DL/data_dir/release/mp_rank_00/model_optim_rng.pt
-VOCAB_FILE=/home/gulhane.2/Megatron-LM-MCR-DL/data_dir/bert-large-uncased-vocab.txt
-DATA_PATH=/home/gulhane.2/Megatron-LM-MCR-DL/Megatron-LM/my-bert_text_sentence
+CHECKPOINT_PATH=<Specify path>
+VOCAB_FILE=<Specify path to file>/bert-vocab.txt
+DATA_PATH=<Specify path and file prefix>_text_sentence
 
 BERT_ARGS="
     --num-layers 24 \
