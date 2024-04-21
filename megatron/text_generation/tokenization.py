@@ -4,7 +4,7 @@
 
 
 import torch
-
+import mcr_dl
 
 from megatron import get_tokenizer, get_args
 from .communication import broadcast_int_list, broadcast_tensor
@@ -30,7 +30,7 @@ def detokenize_generations(tokens_gpu_tensor,
         if return_segments:
             words = []
             for token in sequence_tokens:
-                if args.tokenizer_type in ['SentencePieceTokenizer', 
+                if args.tokenizer_type in ['SentencePieceTokenizer',
                         'GPTSentencePieceTokenizer']:
                     word = tokenizer.decoder[token]
                 elif args.tokenizer_type == 'NullTokenizer':
@@ -58,9 +58,10 @@ def tokenize_prompts(prompts=None, tokens_to_generate=None,
     sizes_list = None
     prompts_tokens_cuda_long_tensor = None
     prompts_length_cuda_long_tensor = None
+    dist = mcr_dl.get_distributed_engine()
 
     # On the specified rank, build the above.
-    if torch.distributed.get_rank() == rank:
+    if dist.get_rank() == rank:
         assert prompts is not None
         assert tokens_to_generate is not None
         # Tensor of tokens padded and their unpadded length.

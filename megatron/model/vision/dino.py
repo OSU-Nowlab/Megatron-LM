@@ -9,6 +9,7 @@ import math
 import apex
 import einops
 import torch
+import mcr_dl
 import numpy as np
 import torch.nn.functional as F
 from torch.nn.init import trunc_normal_
@@ -75,8 +76,9 @@ class DINOLoss(torch.nn.Module):
         Update center used for teacher output.
         """
         batch_center = torch.sum(teacher_output, dim=0, keepdim=True)
-        torch.distributed.all_reduce(batch_center)
-        batch_center = batch_center / (len(teacher_output) * torch.distributed.get_world_size())
+        dist = mcr_dl.get_distributed_engine()
+        dist.all_reduce(batch_center)
+        batch_center = batch_center / (len(teacher_output) * dist.get_world_size())
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
 
 class DINOHead(torch.nn.Module):
@@ -191,7 +193,7 @@ def get_student_backbone_and_num_features(pre_process=True, post_process=True):
     else:
         raise Exception('{} vision backbone is not supported.'.format(
                               args.vision_backbone_type))
- 
+
     return student, num_features
 
 def get_teacher_backbone_and_num_features(pre_process=True, post_process=True):

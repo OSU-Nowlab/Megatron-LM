@@ -5,6 +5,7 @@ from abc import abstractmethod
 import math
 
 import torch
+import mcr_dl
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 from megatron import get_args
@@ -194,7 +195,8 @@ class DistributedDataParallel(DistributedDataParallelBase):
 
     def broadcast_params(self):
         for param in self.module.parameters():
-            torch.distributed.broadcast(param.data,
+            dist = mcr_dl.get_distributed_engine()
+            dist.broadcast(param.data,
                                         src=mpu.get_data_parallel_src_rank(),
                                         group=mpu.get_data_parallel_group())
 
@@ -202,10 +204,11 @@ class DistributedDataParallel(DistributedDataParallelBase):
     def allreduce_gradients(self):
         """Reduce gradients across data parallel ranks."""
         # If we have buffers, simply reduce the data in the buffer.
+        dist = mcr_dl.get_distributed_engine()
         if self._grad_buffers is not None:
             for _, buffer_ in self._grad_buffers.items():
                 buffer_.data /= mpu.get_data_parallel_world_size()
-                torch.distributed.all_reduce(
+                dist.all_reduce(
                     buffer_.data, group=mpu.get_data_parallel_group())
         else:
             # Otherwise, bucketize and all-reduce
@@ -225,7 +228,7 @@ class DistributedDataParallel(DistributedDataParallelBase):
                 grads = [param.grad.data for param in bucket]
                 coalesced = _flatten_dense_tensors(grads)
                 coalesced /= mpu.get_data_parallel_world_size()
-                torch.distributed.all_reduce(
+                dist.all_reduce(
                     coalesced, group=mpu.get_data_parallel_group())
                 for buf, synced in zip(grads, _unflatten_dense_tensors(
                         coalesced, grads)):

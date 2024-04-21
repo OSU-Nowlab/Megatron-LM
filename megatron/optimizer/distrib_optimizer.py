@@ -6,6 +6,7 @@
 from apex.optimizers import FusedAdam as Adam
 import math
 import torch
+import mcr_dl
 
 from megatron import get_args
 from megatron import get_timers
@@ -386,7 +387,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         self.model_param_group_index_map, self.opt_group_ranges = \
             self.build_optimizer_group_ranges(self.optimizer.param_groups,
                                               self.model_gbuf_ranges)
-        
+
         # Allocate main param shards.
         (
             self.model_float16_groups,
@@ -586,6 +587,9 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         data_parallel_group_gloo = mpu.get_data_parallel_group_gloo()
         data_parallel_global_ranks = list(mpu._DATA_PARALLEL_GLOBAL_RANKS)
 
+        # Get distributed engine
+        dist = mcr_dl.get_distributed_engine()
+
         # Collect param states.
         state = {}
         for model_idx, gbuf_range_maps in enumerate(self.model_gbuf_ranges):
@@ -630,7 +634,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                 # Gather contiguous shards on DP rank 0.
                 world_tensors = {}
                 for key, send_tensor in local_shards.items():
-                    
+
                     # Gather tensor list.
                     if data_parallel_rank == 0:
                         recv_tensors = [torch.empty((gbuf_local_numel,),
@@ -641,7 +645,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                         recv_tensors = None
 
                     # Gather.
-                    torch.distributed.gather(
+                    dist.gather(
                         send_tensor,
                         recv_tensors,
                         data_parallel_global_ranks[0],
@@ -679,6 +683,9 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         data_parallel_group_gloo = mpu.get_data_parallel_group_gloo()
         data_parallel_global_ranks = list(mpu._DATA_PARALLEL_GLOBAL_RANKS)
 
+        # Get distributed engine
+        dist = mcr_dl.get_distributed_engine()
+
         # Load on DP rank 0.
         if data_parallel_rank == 0:
             loaded_state = torch.load(filename)
@@ -700,7 +707,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
 
                 # Scatter local shards from DP rank 0.
                 for key, recv_tensor in local_shards.items():
-                    
+
                     # Scatter tensor list.
                     if data_parallel_rank == 0:
                         world_tensor = loaded_state[model_idx][dtype][key]
@@ -712,7 +719,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                         send_tensors = None
 
                     # Scatter.
-                    torch.distributed.scatter(
+                    dist.scatter(
                         recv_tensor,
                         send_tensors,
                         data_parallel_global_ranks[0],
@@ -838,6 +845,9 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         data_parallel_world_size = mpu.get_data_parallel_world_size()
         data_parallel_group = mpu.get_data_parallel_group()
 
+        # Get distributed engine
+        dist = mcr_dl.get_distributed_engine()
+
         # Scale grad buffers by '1 / data_parallel_world_size'.
         for model in self.models:
             for dtype, gbuf in model._grad_buffers.items():
@@ -848,7 +858,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         for index, (model_index, dtype, gbuf, gbuf_views) \
             in enumerate(gbuf_view_items):
 
-            torch.distributed._reduce_scatter_base(
+            dist._reduce_scatter_base(
                 gbuf_views[data_parallel_rank],
                 gbuf,
                 group = data_parallel_group,
@@ -879,10 +889,11 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         #   all sub-views will have consistent start/end indexes across data
         #   parallel ranks.
         pbuf_view_items = self.get_model_param_buffer_dp_views()
+        dist = mcr_dl.get_distributed_engine()
         for index, (model_index, dtype, pbuf, pbuf_views) \
             in enumerate(pbuf_view_items):
 
-            torch.distributed._all_gather_base(
+            dist._all_gather_base(
                 pbuf,
                 pbuf_views[data_parallel_rank],
                 group = data_parallel_group,

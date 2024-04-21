@@ -3,6 +3,7 @@
 """Vision-classification finetuning/evaluation."""
 
 import torch
+import mcr_dl
 import torch.nn.functional as F
 from functools import partial
 from megatron import get_args, get_timers
@@ -87,7 +88,7 @@ def segmentation():
         if not model.training:
             images, masks, _, _ = slidingcrops(images, masks)
         #print_rank_0("images size = {}".format(images.size()))
-       
+
         if not model.training:
             output_tensor = torch.cat([model(image) for image in torch.split(images, args.micro_batch_size)])
         else:
@@ -152,8 +153,9 @@ def segmentation():
             m.train()
         # Reduce.
         if mpu.is_pipeline_last_stage():
-            torch.distributed.all_reduce(performs,
-                                         group=mpu.get_data_parallel_group())
+            dist = mcr_dl.get_distributed_engine()
+            dist.all_reduce(performs,
+                            group=mpu.get_data_parallel_group())
             # Print on screen.
             # performs[int(ch), :] = [nb_tp, nb_fp, nb_tn, nb_fn]
             true_positive = performs[:, 0]

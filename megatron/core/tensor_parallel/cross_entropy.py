@@ -1,6 +1,7 @@
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
 import torch
+import mcr_dl
 
 from megatron.core.parallel_state import (
     get_tensor_model_parallel_group,
@@ -18,9 +19,10 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
 
         # Maximum value along vocab dimension across all GPUs.
         logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
-        torch.distributed.all_reduce(logits_max,
-                                     op=torch.distributed.ReduceOp.MAX,
-                                     group=get_tensor_model_parallel_group())
+        dist = mcr_dl.get_distributed_engine()
+        dist.all_reduce(logits_max,
+                        op=dist.ReduceOp.MAX,
+                        group=get_tensor_model_parallel_group())
         # Subtract the maximum value.
         vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
 
@@ -49,16 +51,16 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
         predicted_logits = predicted_logits_1d.view_as(target)
         predicted_logits[target_mask] = 0.0
         # All reduce is needed to get the chunks from other GPUs.
-        torch.distributed.all_reduce(predicted_logits,
-                                     op=torch.distributed.ReduceOp.SUM,
+        dist.all_reduce(predicted_logits,
+                                     op=dist.ReduceOp.SUM,
                                      group=get_tensor_model_parallel_group())
 
         # Sum of exponential of logits along vocab dimension across all GPUs.
         exp_logits = vocab_parallel_logits
         torch.exp(vocab_parallel_logits, out=exp_logits)
         sum_exp_logits = exp_logits.sum(dim=-1)
-        torch.distributed.all_reduce(sum_exp_logits,
-                                     op=torch.distributed.ReduceOp.SUM,
+        dist.all_reduce(sum_exp_logits,
+                                     op=dist.ReduceOp.SUM,
                                      group=get_tensor_model_parallel_group())
 
         # Loss = log(sum(exp(logits))) - predicted-logit.

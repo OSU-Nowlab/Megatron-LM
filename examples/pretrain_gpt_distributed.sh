@@ -25,6 +25,11 @@ DISTRIBUTED_ARGS="
     --master_port $MASTER_PORT
 "
 
+MCRDL_ARGS="
+    --distributed-engine torch \
+    --distributed-backend nccl \
+"
+
 GPT_ARGS="
     --num-layers 24 \
     --hidden-size 1024 \
@@ -63,6 +68,7 @@ torchrun $DISTRIBUTED_ARGS pretrain_gpt.py \
     $GPT_ARGS \
     $DATA_ARGS \
     $OUTPUT_ARGS \
+    $MCRDL_ARGS \
     --distributed-backend nccl \
     --save $CHECKPOINT_PATH \
     --load $CHECKPOINT_PATH

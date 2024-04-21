@@ -17,6 +17,7 @@ from megatron.text_generation_server import MegatronServer
 from megatron.text_generation import generate_and_post_process
 from megatron.text_generation import beam_search_and_post_process
 import torch
+import mcr_dl
 
 def model_provider(pre_process=True, post_process=True):
     """Build the model."""
@@ -62,9 +63,10 @@ if __name__ == "__main__":
         server = MegatronServer(model)
         server.run("0.0.0.0")
 
+    dist = mcr_dl.get_distributed_engine()
     while True:
         choice = torch.cuda.LongTensor(1)
-        torch.distributed.broadcast(choice, 0)
+        dist.broadcast(choice, 0)
         if choice[0].item() == 0:
             try:
                 generate_and_post_process(model)

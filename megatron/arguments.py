@@ -35,6 +35,7 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False):
     parser = _add_inference_args(parser)
     parser = _add_transformer_engine_args(parser)
     parser = _add_retro_args(parser)
+    parser = _add_mcr_dl_args(parser)
 
     # Custom arguments.
     if extra_args_provider is not None:
@@ -942,7 +943,7 @@ def _add_distributed_args(parser):
                        help='overlap pipeline parallel communication with forward and backward chunks',
                        dest='overlap_p2p_comm')
     group.add_argument('--distributed-backend', default='nccl',
-                       choices=['nccl', 'gloo'],
+                       choices=['nccl', 'mpi', 'gloo'],
                        help='Which backend to use for distributed training.')
     group.add_argument('--distributed-timeout-minutes', type=int, default=10,
                        help='Timeout minutes for torch.distributed.')
@@ -1224,5 +1225,13 @@ def _add_vision_args(parser):
                        help='teacher temperature')
     group.add_argument('--dino-warmup-teacher-temp-epochs', type=int, default=30,
                        help='warmup teacher temperaure epochs')
+
+    return parser
+
+def _add_mcr_dl_args(parser):
+    group = parser.add_argument_group(title='experimental')
+    group.add_argument("--distributed-engine", type=str, default='torch',
+                       choices=['mcr_dl', 'torch'],
+                       help='Distributed DL framework to use')
 
     return parser

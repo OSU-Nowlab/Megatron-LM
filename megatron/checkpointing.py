@@ -8,6 +8,7 @@ import sys
 import numpy as np
 
 import torch
+import mcr_dl
 
 from megatron import update_num_microbatches
 from megatron.core import mpu, tensor_parallel
@@ -164,9 +165,10 @@ def read_metadata(tracker_filename):
         tracker_filename)
 
     # Get the max iteration retrieved across the ranks.
-    if torch.distributed.is_initialized():
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_initialized():
         iters_cuda = torch.cuda.LongTensor([iteration])
-        torch.distributed.all_reduce(iters_cuda, op=torch.distributed.ReduceOp.MAX)
+        dist.all_reduce(iters_cuda, op=dist.ReduceOp.MAX)
         max_iter = iters_cuda[0].item()
 
         # We should now have all the same iteration.
@@ -196,12 +198,13 @@ def get_rng_state():
         'rng_tracker_states': tensor_parallel.get_cuda_rng_tracker().get_states()}
 
     rng_state_list = None
-    if torch.distributed.is_initialized() and \
+    dist = mcr_dl.get_distributed_engine()
+    if dist.is_initialized() and \
             mpu.get_data_parallel_world_size() > 1 and \
             args.data_parallel_random_init:
         rng_state_list = \
             [None for i in range(mpu.get_data_parallel_world_size())]
-        torch.distributed.all_gather_object(
+        dist.all_gather_object(
             rng_state_list,
             rng_state,
             group=mpu.get_data_parallel_group())
@@ -235,7 +238,8 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler):
         optimizer.save_parameter_state(optim_checkpoint_name)
 
     # Collect args, model, RNG.
-    if not torch.distributed.is_initialized() \
+    dist = mcr_dl.get_distributed_engine()
+    if not dist.is_initialized() \
        or mpu.get_data_parallel_rank() == 0:
 
         # Arguments, iteration, and model.
@@ -268,22 +272,22 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler):
         torch.save(state_dict, checkpoint_name)
 
     # Wait so everyone is done (necessary)
-    if torch.distributed.is_initialized():
-        torch.distributed.barrier()
+    if dist.is_initialized():
+        dist.barrier()
 
     print_rank_0('  successfully saved checkpoint at iteration {:7d} to {}' \
                  .format(iteration, args.save))
 
     # And update the latest iteration
-    if not torch.distributed.is_initialized() \
-       or torch.distributed.get_rank() == 0:
+    if not dist.is_initialized() \
+       or dist.get_rank() == 0:
         tracker_filename = get_checkpoint_tracker_filename(args.save)
         with open(tracker_filename, 'w') as f:
             f.write(str(iteration))
 
     # Wait so everyone is done (not necessary)
-    if torch.distributed.is_initialized():
-        torch.distributed.barrier()
+    if dist.is_initialized():
+        dist.barrier()
 
 
 def _transpose_first_dim(t, num_splits, num_splits_first, model):
@@ -509,7 +513,8 @@ def load_checkpoint(model, optimizer, opt_param_scheduler, load_arg='load', stri
         # Conditionally exit at this point.
         if args.exit_on_missing_checkpoint:
             print_rank_0(">> '--exit-on-missing-checkpoint' set ... exiting. <<")
-            torch.distributed.barrier()
+            dist = mcr_dl.get_distributed_engine()
+            dist.barrier()
             sys.exit()
 
         # Iteration defaults to 0.
@@ -631,8 +636,8 @@ def load_checkpoint(model, optimizer, opt_param_scheduler, load_arg='load', stri
             sys.exit()
 
     # Some utilities want to load a checkpoint without distributed being initialized
-    if torch.distributed.is_initialized():
-        torch.distributed.barrier()
+    if dist.is_initialized():
+        dist.barrier()
 
     print_rank_0(f'  successfully loaded checkpoint from {args.load} '
                  f'at iteration {iteration}')
@@ -660,10 +665,10 @@ def load_biencoder_checkpoint(model, only_query_model=False,
     checkpoint_name = get_checkpoint_name(load_path, iteration,
                                           args.use_distributed_optimizer,
                                           release=False)
-
+    dist = mcr_dl.get_distributed_engine()
     if mpu.get_data_parallel_rank() == 0:
         print('global rank {} is loading checkpoint {}'.format(
-            torch.distributed.get_rank(), checkpoint_name))
+            dist.get_rank(), checkpoint_name))
 
     state_dict = torch.load(model_checkpoint_name, map_location='cpu')
     ret_state_dict = state_dict['model']
@@ -675,7 +680,7 @@ def load_biencoder_checkpoint(model, only_query_model=False,
 
     assert len(model) == 1
     model[0].load_state_dict(ret_state_dict)
-    torch.distributed.barrier()
+    dist.barrier()
 
     if mpu.get_data_parallel_rank() == 0:
         print(' successfully loaded {}'.format(checkpoint_name))

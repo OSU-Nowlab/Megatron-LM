@@ -5,6 +5,7 @@ import os
 import random
 import numpy
 import torch
+import mcr_dl
 
 import mpu
 
@@ -53,18 +54,25 @@ def initialize_distributed(backend='nccl'):
     master_ip = os.getenv('MASTER_ADDR', 'localhost')
     master_port = os.getenv('MASTER_PORT', '6000')
     init_method += master_ip + ':' + master_port
-    torch.distributed.init_process_group(
-        backend=backend,
-        world_size=world_size,
-        rank=rank,
+    # dist = mcr_dl.get_distributed_engine()
+    # dist.init_process_group(
+    #     backend=backend,
+    #     world_size=world_size,
+    #     rank=rank,
+    #     init_method=init_method)
+    mcr_dl.init_processes(
+        dist_engine=args.distributed_engine,
+        dist_backend=args.distributed_backend,
+        world_size=world_size, rank=rank,
         init_method=init_method)
 
 
 def print_separator(message):
-    torch.distributed.barrier()
+    dist = mcr_dl.get_distributed_engine()
+    dist.barrier()
     filler_len = (78 - len(message)) // 2
     filler = '-' * filler_len
     string = '\n' + filler + ' {} '.format(message) + filler
-    if torch.distributed.get_rank() == 0:
+    if dist.get_rank() == 0:
         print(string, flush=True)
-    torch.distributed.barrier()
+    dist.barrier()

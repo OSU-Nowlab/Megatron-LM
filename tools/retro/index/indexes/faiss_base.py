@@ -11,6 +11,7 @@ from datetime import timedelta
 import numpy as np
 import os
 import torch
+import mcr_dl
 from tqdm import tqdm
 
 from megatron import get_retro_args, print_rank_0
@@ -29,10 +30,11 @@ class FaissBaseIndex(Index):
         '''Train index (rank 0's method).'''
 
         args = get_retro_args()
+        dist = mcr_dl.get_distributed_engine()
 
-        assert torch.distributed.get_rank() == 0
+        assert dist.get_rank() == 0
 
-        # Set num threads (torch.distributed reset it to 1).
+        # Set num threads (dist reset it to 1).
         # faiss.omp_set_num_threads(32)
         faiss.omp_set_num_threads(64)
         # faiss.omp_set_num_threads(128)
@@ -77,21 +79,24 @@ class FaissBaseIndex(Index):
         '''Train index.'''
 
         # Single process only.
-        if torch.distributed.get_rank() == 0:
+        dist = mcr_dl.get_distributed_engine()
+        if dist.get_rank() == 0:
             self._train()
 
-        torch.distributed.barrier()
+        dist.barrier()
 
     def _add(self, text_dataset):
         '''Add to index (rank 0's method).'''
 
-        assert torch.distributed.get_rank() == 0
+        dist = mcr_dl.get_distributed_engine()
+
+        assert dist.get_rank() == 0
 
         args = get_retro_args()
 
         dataset_sample_ranges = num_samples_to_block_ranges(len(text_dataset))
 
-        # Set num threads (torch.distributed reset it to 1).
+        # Set num threads (dist reset it to 1).
         faiss.omp_set_num_threads(64)
 
         # Bert embedder.
@@ -125,13 +130,14 @@ class FaissBaseIndex(Index):
 
     def add(self, text_dataset):
         '''Add to index.'''
+        dist = mcr_dl.get_distributed_engine()
 
         # Single process only.
-        if torch.distributed.get_rank() == 0:
+        if dist.get_rank() == 0:
             self._add(text_dataset)
 
         # Wait for rank 0.
-        torch.distributed.barrier()
+        dist.barrier()
 
         # Get output index path, for return.
         return self.get_added_index_path()

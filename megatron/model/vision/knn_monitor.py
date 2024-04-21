@@ -1,5 +1,6 @@
 import torch.nn.functional as F
 import torch
+import mcr_dl
 from megatron import print_rank_0, get_args
 from megatron.core import mpu
 from megatron.data.vit_dataset import ClassificationTransform
@@ -47,7 +48,7 @@ def compute_feature_bank(model):
     )
     classes = len(train_ds.classes)
     dataloader = build_data_loader(train_ds)
-     
+
     for m in model:
         m.eval()
 
@@ -59,7 +60,7 @@ def compute_feature_bank(model):
             feature = F.normalize(teacher_feature.float(), dim=1)
             feature_bank.append(feature)
             feature_label.append(labels)
-    
+
     for m in model:
         m.train()
 
@@ -69,7 +70,8 @@ def compute_feature_bank(model):
 
     feature_banks = [torch.zeros_like(feature_bank)
                      for i in range(mpu.get_data_parallel_world_size())]
-    torch.distributed.all_gather(feature_banks,
+    dist = mcr_dl.get_distributed_engine()
+    dist.all_gather(feature_banks,
                                  feature_bank,
                                  group=mpu.get_data_parallel_group())
 
@@ -78,7 +80,7 @@ def compute_feature_bank(model):
 
     feature_labels = [torch.zeros_like(feature_label)
                       for i in range(mpu.get_data_parallel_world_size())]
-    torch.distributed.all_gather(feature_labels,
+    dist.all_gather(feature_labels,
                                  feature_label,
                                  group=mpu.get_data_parallel_group())
 

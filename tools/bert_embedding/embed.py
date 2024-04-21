@@ -5,6 +5,7 @@ import numpy as np
 import os
 import time
 import torch
+import mcr_dl
 from torch.utils.data import BatchSampler, DataLoader, SequentialSampler, Subset
 from torch.utils.data._utils.collate import default_collate
 from tqdm import tqdm
@@ -270,6 +271,7 @@ class DiskDataParallelBertEmbedder:
                           missing_embedding_blocks):
         '''Process a text dataset in blocks.'''
 
+        dist = mcr_dl.get_distributed_engine()
         # Iterate blocks.
         for block_index, block_info in enumerate(missing_embedding_blocks):
 
@@ -296,7 +298,7 @@ class DiskDataParallelBertEmbedder:
 
             # Synchronize progress across all ranks. (for easier observation)
             print_rank_0(" > waiting for other ranks to finish block.")
-            torch.distributed.barrier()
+            dist.barrier()
 
     def embed_text_dataset(self, name, workdir, text_dataset):
         '''Embed a text dataset.'''
@@ -314,7 +316,8 @@ class DiskDataParallelBertEmbedder:
             validate=validate)
 
         # Prevent missing file race condition.
-        torch.distributed.barrier()
+        dist = mcr_dl.get_distributed_engine()
+        dist.barrier()
 
         # Embed batches.
         self.embed_text_blocks(name, workdir, text_dataset,

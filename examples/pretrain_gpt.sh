@@ -42,10 +42,15 @@ OUTPUT_ARGS="
     --eval-interval 1000 \
     --eval-iters 10
 "
+MCRDL_ARGS="
+    --distributed-engine torch \
+    --distributed-backend nccl \
+"
 
 torchrun pretrain_gpt.py \
     $GPT_ARGS \
     $DATA_ARGS \
+    $MCRDL_ARGS \
     $OUTPUT_ARGS \
     --save $CHECKPOINT_PATH \
     --load $CHECKPOINT_PATH

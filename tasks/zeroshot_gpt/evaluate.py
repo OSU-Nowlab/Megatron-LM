@@ -5,6 +5,7 @@
 import math
 
 import torch
+import mcr_dl
 
 from megatron import get_args
 from megatron import print_rank_0, is_last_rank
@@ -130,8 +131,9 @@ def evaluate(data_loader, model, eval_metric):
 
             # Reduce across processes.
             if parallel_state.is_pipeline_last_stage():
-                torch.distributed.all_reduce(output,
-                                             group=parallel_state.get_data_parallel_group())
+                dist = mcr_dl.get_distributed_engine()
+                dist.all_reduce(output,
+                                group=parallel_state.get_data_parallel_group())
 
                 total_output += output
 
